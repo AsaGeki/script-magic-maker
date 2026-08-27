@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Clone do Card Conjurer (2,7 GB de molduras) - baixado pelo setup, ver docs/CARDCONJURER.md
+vendor/
+
+# Saida gerada pela automacao (imagens de carta e PDFs de impressao)
+output/
