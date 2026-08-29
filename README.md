@@ -36,12 +36,13 @@ O atalho não foi descartado, só engavetado: está registrado em
 - Playwright (automação do navegador)
 - Typer, questionary, rich (CLI interativo)
 - Pydantic (validação dos dados da API oficial)
+- Pillow e img2pdf (folha de impressão e PDF)
 - uv (gerenciador de pacotes)
 
 ## Como rodar
 
-Pré-requisitos: Python 3.13+, [`uv`](https://docs.astral.sh/uv/), Git e ~3 GB
-de disco livre pro Card Conjurer.
+Pré-requisitos: Python 3.13+, [`uv`](https://docs.astral.sh/uv/), Git e ~5 GB
+de disco livre pro Card Conjurer (2,5 GB de molduras mais o `.git` do clone).
 
 ```bash
 uv sync
@@ -66,8 +67,19 @@ Sem argumento abre o menu interativo (Cartas/Decks); `cli.py fill "nome"` gera
 direto, sem menu. O servidor local do Card Conjurer sobe e desce sozinho junto
 da automação.
 
+Os demais comandos:
+
+| Comando | O que faz |
+|---|---|
+| `cli.py setup` | Clona o Card Conjurer em `vendor/` |
+| `cli.py deck lista.txt` | Gera todas as cartas de uma lista; `--pdf` já fecha a folha |
+| `cli.py pdf` | Monta o PDF de impressão com o que estiver em `output/` |
+| `cli.py vendor` | Sobe só o Card Conjurer, pra abrir no navegador e conferir |
+| `cli.py serve` | Sobe a API de consulta dos dados |
+| `cli.py config` | Mostra a configuração em uso |
+
 Nenhuma variável em `.env` é obrigatória — `PORT`, `OUTPUT_DIR`, `HEADLESS`,
-`CARDCONJURER_DIR` e `CARDCONJURER_PORT` já têm default.
+`CARDCONJURER_DIR`, `CARDCONJURER_PORT` e `SCRYFALL_USER_AGENT` já têm default.
 
 ## Documentação
 

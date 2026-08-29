@@ -119,29 +119,40 @@ customizadas (Circuit, M15-Eighth, M15-Eighth Universes Beyond).
 ### Resolução
 
 `baseWidth = 1500`, com canvas de **1500x2100** na maioria das molduras e
-**2010x2814** em algumas. O `#previewCanvas` do HTML é 1005x1407 e serve só de
+**2010x2814** em algumas — inclusive na M15 regular, que é a medida que sai na
+prática aqui (cerca de 800 DPI numa carta de 63,5 x 88,9 mm). O `#previewCanvas` do HTML é 1005x1407 e serve só de
 prévia na tela — a imagem real sai do `cardCanvas`.
 
-## Fluxo de automação proposto
+## Fluxo de automação
 
-**A validar** — o desenho abaixo decorre do código lido, mas ainda não foi
-executado ponta a ponta.
+**Verificado** — é o que o `app/maker/` executa.
 
-1. Subir o servidor estático e abrir `/creator` no Playwright.
-2. Definir `#import-language` como `pt` e `#autoFrame` como a moldura desejada.
-3. Chamar `fetchScryfallData(nome, importCard)` por `evaluate` e aguardar o
+1. Subir o servidor estático e abrir `/creator/?mtgpics=1` no Playwright, com
+   `enableImportCollectorInfo`, `enableCollectorInfo` e `autoLoadFrameVersion`
+   já gravados no `localStorage` antes do carregamento.
+2. Carregar um pacote de molduras: `#selectFrameGroup` como `Standard-3` e
+   `#selectFramePack` como `M15Regular-1`. **Sem isso nada funciona** — a
+   página abre com o objeto `card` sem `text`, e tanto `changeCardIndex()`
+   quanto `autoFrame()` quebram em `Cannot read properties of undefined`.
+3. Definir `#import-language`, `#autoFrame` e marcar `#importAllPrints`.
+4. Chamar `fetchScryfallData(nome, importCard)` por `evaluate` e aguardar o
    `#import-index` ser populado.
-4. Escolher a impressão e disparar `changeCardIndex()`.
-5. Ler a imagem final.
+5. Esperar o desenho estabilizar, e só então trocar de impressão se for o caso.
+6. Trocar a arte pela do MTGPics e esperar de novo.
+7. Ler `cardCanvas.toDataURL('image/png')`.
 
-Sobre o passo 5, há dois caminhos:
+O gerador não avisa quando terminou de desenhar: arte, símbolo de expansão e
+camadas de moldura chegam cada um no seu tempo. A saída é amostrar o canvas
+reduzido a 32x44 e considerar pronto quando três leituras seguidas saem iguais.
+
+Sobre o passo 7, há dois caminhos:
 
 - **Interceptar o download.** `downloadCard()` monta um `<a download>` e clica
   nele, o que o `expect_download()` do Playwright captura.
 - **Ler o canvas direto.** `downloadCard()` obtém a imagem de
-  `cardCanvas.toDataURL('image/png')`. Dá pra chamar isso por `evaluate` e
-  pular o download inteiro. Mais rápido e sem mexer no sistema de arquivos do
-  navegador — é o caminho a tentar primeiro.
+  `cardCanvas.toDataURL('image/png')`. Chamar isso por `evaluate` pula o
+  download inteiro, é mais rápido e não passa pela exigência de creditar o
+  artista. É o caminho em uso.
 
 O ganho de chamar função em vez de preencher campo a campo é grande: no
 `script-yugioh-maker` foi preciso subir do `<label>` pro elemento pai porque o
@@ -149,6 +160,35 @@ site não associava rótulo a campo, além de calcular tamanho de fonte na mão.
 Aqui nada disso é necessário.
 
 ## Pegadinhas
+
+**O servidor precisa declarar `charset=utf-8`.** O `creator/index.html` não tem
+`<meta charset>`, então o navegador cai no padrão e lê `creator-23.js` como
+Latin-1. Os caracteres escritos dentro do próprio código quebram: as aspas
+curvas que o `curlyQuotes()` insere no texto saem como `â€™` impresso na carta.
+O texto vindo do Scryfall não sofre, porque o XHR decodifica por conta própria —
+o que faz o defeito aparecer só em parte das cartas.
+
+**O MTGPics precisa ser ligado, e passa por proxy de terceiro.** A arte grande
+só é tentada quando a URL tem o parâmetro `?mtgpics` — é `params.get('mtgpics')`
+que libera o caminho dentro de `changeArtIndex()`. E, quando liberado, o
+pedido não vai direto ao MTGPics: vai a `https://corsproxy.io/?<url>`. O
+projeto contorna os dois pontos baixando a arte por fora e entregando ao
+gerador como data URL via `uploadArt(src, 'autoFit')`.
+
+**A arte não acompanha a impressão sem `#importAllPrints`.** A lista de artes
+vem de uma segunda busca no Scryfall, e `artFromScryfall()` só casa a
+ilustração da impressão escolhida quando essa caixa está marcada. Sem ela sai a
+arte de outra edição, com o crédito de artista errado junto.
+
+**O rodapé só aparece na segunda visita.** Se `enableCollectorInfo` não existe
+no `localStorage`, o Card Conjurer grava `'true'` mas não marca a caixa — o
+`checked` só é aplicado no `else`. Gravar a chave antes do carregamento resolve.
+
+**Chamar `changeCardIndex()` duas vezes duplica o número do colecionador.**
+`importCard()` já chama a função no fim; uma segunda chamada dispara outro
+pedido a `/sets/{código}`, e as duas respostas concatenam o total de cartas no
+mesmo campo (`187/361/361`). Esperar a primeira rodada terminar, e só trocar de
+impressão quando o índice for realmente outro, evita a corrida.
 
 **Artista é obrigatório pra baixar.** `downloadCard()` recusa e mostra
 `You must credit an artist before downloading!` se o campo de artista estiver

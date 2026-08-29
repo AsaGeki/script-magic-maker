@@ -127,31 +127,41 @@ sozinho.
 
 ## Fases
 
-- [ ] **1. Esqueleto** — `pyproject.toml`, `.env.example`, `.gitignore` com
+- [x] **1. Esqueleto** — `pyproject.toml`, `.env.example`, `.gitignore` com
   `vendor/`, `app/config.py`, `app/errors.py`, `cli.py` mínimo.
-- [ ] **2. Dados** — `app/cards/`: modelos, enums, cliente do Scryfall, busca
+- [x] **2. Dados** — `app/cards/`: modelos, enums, cliente do Scryfall, busca
   por nome com `lang:pt` e detecção de ausência de português.
-- [ ] **3. API** — `app/main.py` e `app/cards/routes.py`: consulta de leitura
+- [x] **3. API** — `app/main.py` e `app/cards/routes.py`: consulta de leitura
   pra conferir os dados antes de gerar.
-- [ ] **4. Vendor** — `app/vendor/`: clone do fork, servidor estático local,
+- [x] **4. Vendor** — `app/vendor/`: clone do fork, servidor estático local,
   verificação de saúde, encerramento limpo.
-- [ ] **5. Maker** — `app/maker/`: automação do Card Conjurer, carta avulsa
-  primeiro, depois dupla face e demais layouts.
-- [ ] **6. CLI** — menu interativo, preview no terminal, a pergunta de idioma
+- [x] **5. Maker** — `app/maker/`: automação do Card Conjurer, carta avulsa
+  primeiro, depois dupla face e demais layouts. Dupla face ainda não sai.
+- [x] **6. CLI** — menu interativo, preview no terminal, a pergunta de idioma
   quando faltar português.
-- [ ] **7. Decks** — importação de lista e geração em lote reaproveitando um
+- [x] **7. Decks** — importação de lista e geração em lote reaproveitando um
   navegador só.
-- [ ] **8. Impressão** — `app/print/`, portado do projeto do Yu-Gi-Oh.
+- [x] **8. Impressão** — `app/print/`: folha A4 3x3 com marcas de corte e PDF
+  no tamanho físico exato.
 
 ## Em aberto
 
 - **Layouts além do `normal`.** Dupla face, split, adventure, saga e
   planeswalker têm forma própria e vão precisar de tratamento caso a caso no
-  `app/maker/`. A fase 5 começa só pelo `normal`.
-- **De onde importar deck.** Moxfield e Archidekt têm API; o formato `.dec` em
-  texto puro é o mínimo. A decidir na fase 7.
+  `app/maker/`. Os de duas faces são recusados com mensagem clara; os demais
+  passam pelo `autoFrame` sem tratamento próprio.
+
+- **Moldura de terreno full art.** O `autoFrame` aplica a M15 comum em terreno
+  básico de arte estendida, e a carta sai com a caixa de texto vazia. A saída é
+  escolher `FullArtNew` para esses casos.
+- **De onde importar deck.** Feito por lista em texto, que é o que Moxfield,
+  Archidekt e Arena exportam. Import por URL continua de fora: o Archidekt tem
+  API pública e caberia; o Moxfield bloqueia acesso programático.
 - **Cartas pós-Modern Horizons 3.** Sem tradução oficial em papel. A decisão de
   hoje é perguntar no CLI; se um dia isso incomodar, a saída é extrair a
   localização pt-BR do MTG Arena. Ver [PESQUISA.md](PESQUISA.md).
-- **Peso do `vendor/`.** 2,7 GB. Se virar problema, dá pra fazer clone parcial
+- **Peso do `vendor/`.** 4,96 GB medidos depois do `setup`: 2,53 GB de árvore
+  de trabalho mais 2,44 GB de `.git`, que o `--depth 1` não evita. Apagar o
+  `.git` depois do clone devolve metade do espaço, ao custo de não dar mais pra
+  atualizar com `git pull` (re-clonar resolve). Se virar problema, dá pra fazer clone parcial
   só das molduras em uso (~580 MB usando a família M15).
