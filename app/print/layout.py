@@ -79,18 +79,19 @@ def _fronteiras_de_corte(
 def _desenhar_linhas_de_corte(desenho: ImageDraw.ImageDraw) -> None:
     """Grade INTEIRA de linhas vermelhas (bordas externas + 1 linha no meio de
     cada espaco entre celulas) - sempre a grade fixa de 3x3, mesmo com celula
-    vazia."""
+    vazia. Linhas atravessam a folha de ponta a ponta (nao param na borda da
+    grade) pra servir de guia de alinhamento na guilhotina."""
     xs = _fronteiras_de_corte(_MARGEM_X_PX, CARTA_LARGURA_PX, COLUNAS)
     ys = _fronteiras_de_corte(_MARGEM_Y_PX, CARTA_ALTURA_PX, LINHAS)
     for x in xs:
         desenho.line(
-            [(x, ys[0]), (x, ys[-1])],
+            [(x, 0), (x, A4_ALTURA_PX)],
             fill=LINHA_CORTE_COR,
             width=LINHA_CORTE_ESPESSURA_PX,
         )
     for y in ys:
         desenho.line(
-            [(xs[0], y), (xs[-1], y)],
+            [(0, y), (A4_LARGURA_PX, y)],
             fill=LINHA_CORTE_COR,
             width=LINHA_CORTE_ESPESSURA_PX,
         )
