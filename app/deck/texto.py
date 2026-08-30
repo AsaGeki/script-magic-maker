@@ -1,7 +1,6 @@
-"""Leitura de lista de deck em texto.
-
-Cobre o que Moxfield, Archidekt e o MTG Arena exportam: uma carta por linha,
-com quantidade na frente e, às vezes, edição e número entre parênteses.
+"""Leitura de lista de deck em texto - equivalente ao ydk.py do
+script-yugioh-maker, so que aqui o formato e o texto que Moxfield, Archidekt e
+o MTG Arena exportam, nao o .ydk numerico da Konami.
 
     4 Lightning Bolt
     4x Raio
@@ -9,21 +8,21 @@ com quantidade na frente e, às vezes, edição e número entre parênteses.
     // Sideboard
     2 Negate
 
-Linhas em branco, comentários (`#` e `//`) e cabeçalhos de seção são
-descartados — o cabeçalho vira a seção das linhas seguintes.
+Linha em branco, comentario (`#` e `//`) e cabecalho de secao sao descartados -
+o cabecalho vira a secao das linhas seguintes.
 """
 
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.errors import ErroDeDeck
+from app.errors import BadRequestError
 
 MAIN = "main"
 SIDEBOARD = "sideboard"
 COMMANDER = "commander"
 
-# Cabeçalhos que os sites usam pra separar as partes do deck.
+# Cabecalhos que os sites usam pra separar as partes do deck.
 SECOES = {
     "deck": MAIN,
     "main": MAIN,
@@ -50,7 +49,7 @@ LINHA = re.compile(
 
 @dataclass
 class EntradaDeDeck:
-    """Uma linha da lista, já separada em partes."""
+    """Uma linha da lista, ja separada em partes."""
 
     quantidade: int
     nome: str
@@ -62,8 +61,8 @@ class EntradaDeDeck:
 def analisar_lista(texto: str) -> list[EntradaDeDeck]:
     """Converte o texto da lista em entradas.
 
-    Uma linha que não casa com o formato é erro: passar despercebido faria o
-    deck sair incompleto sem ninguém notar.
+    Linha que nao casa com o formato e erro: passar despercebido faria o deck
+    sair incompleto sem ninguem notar.
     """
     entradas: list[EntradaDeDeck] = []
     secao = MAIN
@@ -83,7 +82,7 @@ def analisar_lista(texto: str) -> list[EntradaDeDeck]:
 
         casamento = LINHA.match(linha)
         if casamento is None or not casamento.group("nome").strip():
-            raise ErroDeDeck(f"Linha {numero_da_linha} não parece uma carta: {bruta!r}")
+            raise BadRequestError(f"Linha {numero_da_linha} nao parece uma carta: {bruta!r}")
 
         entradas.append(
             EntradaDeDeck(
@@ -96,22 +95,22 @@ def analisar_lista(texto: str) -> list[EntradaDeDeck]:
         )
 
     if not entradas:
-        raise ErroDeDeck("A lista está vazia.")
+        raise BadRequestError("A lista esta vazia")
     return entradas
 
 
 def ler_arquivo(caminho: Path) -> list[EntradaDeDeck]:
     """Mesma coisa, lendo de um arquivo."""
     if not caminho.is_file():
-        raise ErroDeDeck(f"Arquivo de deck não encontrado: {caminho}")
+        raise BadRequestError(f'Arquivo de deck "{caminho}" nao encontrado')
     return analisar_lista(caminho.read_text(encoding="utf-8"))
 
 
 def cartas_unicas(entradas: list[EntradaDeDeck]) -> list[EntradaDeDeck]:
-    """Junta repetições da mesma carta, somando as quantidades.
+    """Junta repeticoes da mesma carta, somando as quantidades.
 
-    A imagem é gerada uma vez por carta, não uma vez por cópia; quantas cópias
-    imprimir é problema da folha de impressão.
+    A imagem e gerada uma vez por carta, nao uma por copia; quantas copias
+    imprimir e problema da folha (ver app.print).
     """
     juntas: dict[tuple[str, str | None, str | None], EntradaDeDeck] = {}
     for entrada in entradas:

@@ -1,50 +1,29 @@
-"""Exceções da aplicação.
-
-Todas descendem de ErroDoApp, então o CLI e a API conseguem capturar num ponto
-só e mostrar a mensagem — que já vem em português, pronta pro usuário final.
-"""
+"""Erros de domínio conhecidos - diferente de bug (500), são situações
+esperadas (carta não encontrada, dado inválido) que a API converte pra uma
+resposta HTTP tratada em vez de deixar estourar como erro interno."""
 
 
-class ErroDoApp(Exception):
-    """Base de todo erro previsto do projeto."""
+class AppError(Exception):
+    status_code = 400
+
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
 
 
-# --- Scryfall / dados da carta ---
+class NotFoundError(AppError):
+    status_code = 404
 
 
-class ErroDoScryfall(ErroDoApp):
-    """Falha ao falar com a API do Scryfall."""
+class BadRequestError(AppError):
+    status_code = 400
 
 
-class CartaNaoEncontrada(ErroDoApp):
-    def __init__(self, nome: str) -> None:
-        self.nome = nome
-        super().__init__(f"Carta não encontrada no Scryfall: {nome!r}.")
+class ConflictError(AppError):
+    status_code = 409
 
 
-class SemVersaoEmPortugues(ErroDoApp):
-    def __init__(self, nome: str) -> None:
-        self.nome = nome
-        super().__init__(f"A carta {nome!r} não tem impressão em português.")
+class UpstreamError(AppError):
+    """Falha ao falar com serviço de fora (Scryfall, MTGPics)."""
 
-
-# --- Card Conjurer (vendor) ---
-
-
-class ErroDoCardConjurer(ErroDoApp):
-    """Falha na automação ou no servidor local do Card Conjurer."""
-
-
-class CardConjurerNaoInstalado(ErroDoCardConjurer):
-    def __init__(self, caminho: str) -> None:
-        self.caminho = caminho
-        super().__init__(
-            f"Card Conjurer não encontrado em {caminho}. Rode 'uv run cli.py setup' primeiro."
-        )
-
-
-# --- Deck ---
-
-
-class ErroDeDeck(ErroDoApp):
-    """Lista de deck inválida ou que não pôde ser resolvida."""
+    status_code = 502

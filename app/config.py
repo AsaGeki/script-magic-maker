@@ -1,56 +1,32 @@
-"""Leitura da configuração do .env.
-
-Nenhuma variável é obrigatória — todas têm default. Os caminhos relativos são
-resolvidos a partir da raiz do projeto, então funcionam de qualquer diretório.
-"""
-
-from functools import lru_cache
+import os
 from pathlib import Path
 
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
 
-# Raiz do projeto: dois níveis acima deste arquivo (app/config.py).
+load_dotenv()
+
 RAIZ = Path(__file__).resolve().parent.parent
 
+PORT = int(os.environ.get("PORT", "8000"))
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "output")
+# HEADLESS=false abre a janela do Chrome pra debug visual (default: headless, sem janela)
+HEADLESS = os.environ.get("HEADLESS", "true").strip().lower() not in ("false", "0", "")
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=RAIZ / ".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
+# Fork do Card Conjurer auto-hospedado - nao existe no script-yugioh-maker, la
+# o gerador e um site de terceiro; aqui ele roda local.
+CARDCONJURER_DIR = Path(os.environ.get("CARDCONJURER_DIR", "vendor/cardconjurer"))
+if not CARDCONJURER_DIR.is_absolute():
+    CARDCONJURER_DIR = RAIZ / CARDCONJURER_DIR
+CARDCONJURER_PORT = int(os.environ.get("CARDCONJURER_PORT", "4242"))
+CARDCONJURER_URL = f"http://127.0.0.1:{CARDCONJURER_PORT}"
 
-    # API FastAPI de consulta.
-    port: int = 8000
+# O Scryfall pede um User-Agent identificavel em vez de chave de API.
+SCRYFALL_USER_AGENT = os.environ.get("SCRYFALL_USER_AGENT", "script-magic-maker/0.1.0")
 
-    # Onde as imagens geradas são salvas.
-    output_dir: Path = Path("output")
-
-    # false abre o navegador na tela, útil pra depurar a automação.
-    headless: bool = True
-
-    # Fork do Card Conjurer auto-hospedado.
-    cardconjurer_dir: Path = Path("vendor/cardconjurer")
-    cardconjurer_port: int = 4242
-
-    # O Scryfall pede um User-Agent identificável.
-    scryfall_user_agent: str = Field(default="script-magic-maker/0.1.0")
-
-    @field_validator("output_dir", "cardconjurer_dir")
-    @classmethod
-    def _resolver_caminho(cls, valor: Path) -> Path:
-        """Caminho relativo passa a valer a partir da raiz do projeto."""
-        return valor if valor.is_absolute() else RAIZ / valor
-
-    @property
-    def cardconjurer_url(self) -> str:
-        return f"http://127.0.0.1:{self.cardconjurer_port}"
-
-
-@lru_cache
-def get_settings() -> Settings:
-    return Settings()
-
-
-settings = get_settings()
+# Cache dos bancos de carta do MTG Arena (mtgatool-metadata) - traducao pt de
+# carta pos-corte, que o Scryfall nao tem. Fica em vendor/ pelo mesmo motivo
+# do Card Conjurer: dado de terceiro baixado, fora do controle de versao.
+ARENA_CACHE_DIR = Path(os.environ.get("ARENA_CACHE_DIR", "vendor/arena"))
+if not ARENA_CACHE_DIR.is_absolute():
+    ARENA_CACHE_DIR = RAIZ / ARENA_CACHE_DIR
+ARENA_CACHE_MAX_DIAS = int(os.environ.get("ARENA_CACHE_MAX_DIAS", "7"))

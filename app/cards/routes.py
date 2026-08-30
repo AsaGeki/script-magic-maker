@@ -1,63 +1,39 @@
-"""Rotas de consulta da carta.
-
-Só leitura: servem pra conferir os dados antes de gerar a imagem. Quem gera
-carta é o CLI.
-
-As rotas são `def`, não `async def`, porque o cliente do Scryfall é síncrono —
-o FastAPI roda função síncrona em threadpool, sem travar o laço de eventos.
-"""
-
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Query
 
 from app.cards.models import ScryfallCard
-from app.cards.scryfall import ScryfallClient
+from app.cards.service import (
+    find_card_by_id,
+    find_card_by_name,
+    search_cards,
+    suggest_names,
+)
+from app.response import ApiResponse
 
-router = APIRouter(prefix="/cards", tags=["cards"])
-
-
-def get_client(request: Request) -> ScryfallClient:
-    """O cliente é criado uma vez no lifespan e vive no estado da aplicação."""
-    return request.app.state.scryfall
-
-
-Cliente = Annotated[ScryfallClient, Depends(get_client)]
+router = APIRouter()
 
 
-@router.get("/autocomplete", summary="Nomes que completam o trecho digitado")
-def autocomplete(
-    cliente: Cliente,
-    q: Annotated[str, Query(min_length=2, description="Trecho do nome da carta")],
-    lang: Annotated[str, Query(description="pt usa a busca; qualquer outro, o autocomplete")] = "pt",
-) -> list[str]:
-    """O autocomplete oficial do Scryfall só fala inglês, daí o desvio em pt."""
-    if lang == "pt":
-        return cliente.sugerir_em_portugues(q)
-    return cliente.sugerir(q)
+# GET /cards/{name} -> busca carta oficial pelo nome em portugues, retorna dados ja em PT
+@router.get("/cards/{name}", response_model=ApiResponse[ScryfallCard])
+async def get_card(name: str, ingles: bool = Query(False)):
+    carta = await find_card_by_name(name, permitir_ingles=ingles)
+    return ApiResponse(message="Carta encontrada!", data=carta)
 
 
-@router.get("/search", summary="Todas as impressões da carta num idioma")
-def search(
-    cliente: Cliente,
-    q: Annotated[str, Query(min_length=1, description="Nome da carta")],
-    lang: Annotated[str, Query(description="Idioma da impressão")] = "pt",
-    exato: Annotated[bool, Query(description="Casar o nome inteiro")] = True,
-) -> list[ScryfallCard]:
-    return cliente.buscar(q, lang=lang, exato=exato)
+# GET /cards/{name}/prints -> todas as impressoes daquele nome
+@router.get("/cards/{name}/prints", response_model=ApiResponse[list[ScryfallCard]])
+async def get_prints(name: str, lang: str = Query("pt")):
+    impressoes = await search_cards(name, lang=lang)
+    return ApiResponse(message=f"{len(impressoes)} impressoes", data=impressoes)
 
 
-@router.get("/id/{card_id}", summary="Uma impressão pelo identificador do Scryfall")
-def por_id(cliente: Cliente, card_id: str) -> ScryfallCard:
-    return cliente.buscar_por_id(card_id)
+# GET /prints/{card_id} -> 1 impressao especifica pelo id do Scryfall
+@router.get("/prints/{card_id}", response_model=ApiResponse[ScryfallCard])
+async def get_print(card_id: str):
+    return ApiResponse(message="Impressao encontrada!", data=await find_card_by_id(card_id))
 
 
-@router.get("/{nome}", summary="A carta em português, como o gerador vai receber")
-def por_nome(
-    cliente: Cliente,
-    nome: str,
-    permitir_ingles: Annotated[
-        bool, Query(description="Cai pro inglês quando não houver impressão em português")
-    ] = False,
-) -> ScryfallCard:
-    return cliente.buscar_carta(nome, permitir_ingles=permitir_ingles)
+# GET /autocomplete?q= -> nomes em portugues que completam o trecho
+@router.get("/autocomplete", response_model=ApiResponse[list[str]])
+async def get_autocomplete(q: str = Query(min_length=2)):
+    nomes = await suggest_names(q)
+    return ApiResponse(message=f"{len(nomes)} sugestoes", data=nomes)

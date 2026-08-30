@@ -217,8 +217,11 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Clone do Card Conjurer (2,7 GB de molduras) - baixado pelo setup, ver docs/CARDCONJURER.md
-vendor/
+# Clone do Card Conjurer e cache do banco do MTG Arena - baixados pelo setup.
+# So a raiz (/vendor/): sem a barra na frente, casa qualquer pasta chamada
+# "vendor" em qualquer nivel, inclusive app/vendor/ (modulo nosso) - foi
+# exatamente isso que aconteceu e excluiu app/vendor/ do controle de versao.
+/vendor/
 
 # Saida gerada pela automacao (imagens de carta e PDFs de impressao)
 output/

@@ -1,51 +1,39 @@
-"""Geração do PDF de impressão.
+"""Exporta as folhas montadas (ver layout.py) pra 1 arquivo PDF, 1 pagina por
+folha - pro fluxo "gerar PDF e imprimir manualmente".
 
-As folhas montadas viram um PDF com a página no tamanho físico exato, pra
-impressora não reescalar nada. O img2pdf embute a imagem sem recomprimir.
+Diferente do script-yugioh-maker, que salva pelo proprio Pillow: aqui passa
+pelo img2pdf, que embute o PNG sem recomprimir. O ponto do projeto e carta em
+resolucao de impressao, e recompressao em JPEG comeria justamente isso.
 """
 
 import io
 from pathlib import Path
 
 import img2pdf
+from PIL import Image
 
-from app.config import settings
-from app.errors import ErroDoApp
-from app.print.folha import POR_FOLHA, LayoutDaFolha, montar_folha
+from app.config import OUTPUT_DIR
+from app.errors import BadRequestError
+from app.print import layout
 
-
-def paginar(imagens: list[Path]) -> list[list[Path]]:
-    """Divide a lista de cartas em grupos de nove."""
-    return [imagens[i : i + POR_FOLHA] for i in range(0, len(imagens), POR_FOLHA)]
+OUTPUT_PATH = Path(OUTPUT_DIR)
 
 
-def repetir_por_quantidade(pares: list[tuple[Path, int]]) -> list[Path]:
-    """Uma entrada por cópia a imprimir, na ordem em que veio."""
-    return [caminho for caminho, quantidade in pares for _ in range(max(1, quantidade))]
-
-
-def montar_pdf(
-    imagens: list[Path],
-    destino: Path | None = None,
-    layout: LayoutDaFolha | None = None,
-) -> Path:
-    """Monta as folhas e fecha o PDF. Devolve o caminho do arquivo."""
-    if not imagens:
-        raise ErroDoApp("Nenhuma imagem para imprimir.")
-
-    layout = layout or LayoutDaFolha()
-    caminho = destino or (settings.output_dir / "impressao.pdf")
-    caminho.parent.mkdir(parents=True, exist_ok=True)
+def exportar_pdf(folhas: list[Image.Image], nome_arquivo: str) -> Path:
+    if not folhas:
+        raise BadRequestError("Nenhuma folha pra exportar")
+    OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
+    destino = OUTPUT_PATH / nome_arquivo
 
     paginas: list[bytes] = []
-    for grupo in paginar(imagens):
+    for folha in folhas:
         buffer = io.BytesIO()
-        montar_folha(grupo, layout).save(buffer, format="PNG")
+        folha.save(buffer, format="PNG")
         paginas.append(buffer.getvalue())
 
-    largura_mm, altura_mm = layout.pagina_mm
-    tamanho_em_pontos = (img2pdf.mm_to_pt(largura_mm), img2pdf.mm_to_pt(altura_mm))
-    caminho.write_bytes(
-        img2pdf.convert(paginas, layout_fun=img2pdf.get_layout_fun(tamanho_em_pontos))
+    tamanho = (
+        img2pdf.mm_to_pt(layout.A4_LARGURA_MM),
+        img2pdf.mm_to_pt(layout.A4_ALTURA_MM),
     )
-    return caminho
+    destino.write_bytes(img2pdf.convert(paginas, layout_fun=img2pdf.get_layout_fun(tamanho)))
+    return destino

@@ -8,6 +8,7 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict
 
+from app.cards.arena import TraducaoArena
 from app.cards.enums import Layout, Rarity
 
 
@@ -82,18 +83,29 @@ class ScryfallCard(FaceBase):
     released_at: date | None = None
     card_faces: list[CardFace] | None = None
 
+    # Campo nosso, não vem da API - quantas cópias o deck pede desta carta,
+    # usado só pela folha de impressão (ver app.print.service).
+    copias: int = 1
+
+    # Também nosso: tradução do MTG Arena pra esta impressão, quando existe
+    # (ver app.cards.arena). Preenchido depois da consulta ao Scryfall, nunca
+    # vem da API. Cobre carta pós-corte de tradução, que só saiu em português
+    # no jogo digital.
+    arena: TraducaoArena | None = None
+
     # Extras que ajudam a escolher moldura caso um dia isso saia do autoFrame.
     cmc: float | None = None
     color_identity: list[str] | None = None
     frame: str | None = None
     border_color: str | None = None
     full_art: bool = False
+    frame_effects: list[str] | None = None
     promo: bool = False
     textless: bool = False
     finishes: list[str] | None = None
 
     @property
-    def tem_portugues(self) -> bool:
+    def traduzida(self) -> bool:
         """Se esta impressão é a versão em português.
 
         Checa o idioma da impressão, não a presença de printed_name: uma carta
