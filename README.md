@@ -90,6 +90,18 @@ Vale dizer: a Wizards parou de imprimir Magic em português depois de Modern
 Horizons 3, em 2024. Boa parte da graça disso aqui é justamente conseguir
 carta em português de coisa que nunca saiu em português.
 
+## Créditos
+
+Este projeto não seria possível sem estes serviços e projetos de terceiros:
+
+- **[Scryfall](https://scryfall.com)** — API oficial com os dados de cada carta.
+- **[Card Conjurer](https://github.com/Investigamer/cardconjurer)** — motor de geração da imagem (fork usado aqui, auto-hospedado).
+- **[MTGJSON](https://mtgjson.com)** — índice dos decks pré-construídos oficiais.
+- **[mtgatool-metadata](https://github.com/mtgatool/mtgatool-metadata)** — banco de tradução PT do MTG Arena (GPL-3.0).
+- **[MTGPics](https://www.mtgpics.com)** — fonte de arte em alta resolução.
+
+Magic: The Gathering é marca registrada da Wizards of the Coast. Este projeto não é afiliado a ela.
+
 ---
 
 Feito com esforço por [AsaGeki](https://github.com/AsaGeki) 🐧❤️
