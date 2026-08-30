@@ -139,11 +139,6 @@ _SELECIONAR_IMPRESSAO = """(i) => {
 # FINAIS que changeCardIndex() vai ler. Patchar antes de importCard() faz o
 # proprio site aplicar curlyQuotes, itailico de reminder text e formatacao de
 # flavor uma vez so - a mesma coisa que ele faz pra carta com pt de verdade.
-# A alternativa (sobrescrever card.text.* depois de mudo) foi tentada e
-# descartada: drawTextBuffer() redesenha TODOS os campos de texto juntos, e
-# redesenhar o titulo uma segunda vez corrompeu o ultimo glifo na moldura
-# antiga "seventh" - verificado, reproduzivel, nao tem a ver com o conteudo
-# do texto em si.
 _IMPORTAR_CARTAS = """(args) => {
     const { nome, idAlvo, tipoDeReserva, textoDeReserva, arenaId, arenaNome, arenaTexto, arenaFlavor } = args;
     fetchScryfallData(nome, (cards) => {
@@ -164,7 +159,7 @@ _IMPORTAR_CARTAS = """(args) => {
         // impressao que queremos ja na frente, ele acerta de primeira - sem
         // isso, desenhava a errada e so depois _selecionar_impressao() (Python)
         // trocava e desenhava tudo de novo, dobrando o tempo de composicao das
-        // camadas (~5-6s a mais por carta, medido).
+        // camadas.
         const indiceAlvo = cards.findIndex((c) => c.id === idAlvo);
         if (indiceAlvo > 0) {
             const [alvo] = cards.splice(indiceAlvo, 1);
@@ -231,22 +226,14 @@ async def abrir_pagina(browser: Browser) -> Page:
     return page
 
 
-# writeText() (o motor de texto do proprio site) troca a ultima letra de uma
-# palavra por um glifo alternativo decorativo quando a fonte do campo e
-# exatamente 'belerenb' (titulo, na maioria das molduras modernas - 173
-# pacotes usam essa fonte) e a palavra termina em f/h/m/n/k. Verificado que
-# esse glifo alternativo (area de uso privado do Unicode, ex: U+E007 pro 'h')
-# nao renderiza no Chromium que o Playwright baixa - vira caixa vazia -
-# mesmo a fonte .ttf tendo o glifo certinho (conferido byte a byte com
-# fonttools: cmap, OS/2 e o contorno do glifo todos corretos). Reproduz igual
-# com o navegador visivel, entao nao e coisa de modo headless - e limitacao
-# real desse Chromium especifico com esse arquivo de fonte.
-#
-# A troca de glifo e so floreio decorativo (nao muda a letra, so estiliza a
-# ultima letra da palavra) - sem ela a carta fica identica, so sem esse
-# capricho. Como o gatilho e literal (`font.endsWith('belerenb')`), registrar
-# a MESMA fonte sob outro nome e trocar so o `.font` do campo de texto pra
-# esse alias evita o gatilho de vez, sem editar nada em vendor/cardconjurer.
+# writeText() (motor de texto do proprio site) troca a ultima letra de uma
+# palavra por um glifo decorativo (area de uso privado do Unicode) quando a
+# fonte do campo e exatamente 'belerenb' e a palavra termina em f/h/m/n/k.
+# Esse glifo nao renderiza no Chromium que o Playwright usa - vira caixa
+# vazia, mesmo a fonte tendo o glifo certo. E so floreio (nao muda a letra),
+# entao registrar a MESMA fonte sob outro nome e trocar o `.font` do campo
+# evita o gatilho (literal, `font.endsWith('belerenb')`) sem editar
+# vendor/cardconjurer.
 FONTE_SEM_BUG = "belerenb-sembug"
 
 _TROCAR_PARA_FONTE_SEM_BUG = f"""() => {{
@@ -371,13 +358,12 @@ async def _redesenhar_texto_final(page: Page) -> None:
     fica no indice 0 (e _selecionar_impressao nao precisa trocar nada),
     changeCardIndex() e chamado so dali de dentro - encadeado direto no
     onreadystatechange do XHR de busca - e o titulo sai com o ultimo glifo
-    faltando em moldura tipo "seventh" (fonte goudymedieval, reproduzido com
-    "Determinação de Yawgmoth" em Urza's Saga). Chamar drawTextBuffer() de
-    novo, mas por fora, numa chamada evaluate() separada, corrige - o
-    layout/canvas parece nao estar totalmente assentado ainda enquanto o
-    navegador esta no meio do callback do XHR. Usa so drawTextBuffer() e nao
-    changeCardIndex() de novo: o segundo reconsultaria /sets e duplicaria o
-    numero do colecionador ("187/361/361", ver _selecionar_impressao).
+    faltando em moldura tipo "seventh". Chamar drawTextBuffer() de novo, mas
+    por fora, numa chamada evaluate() separada, corrige: o layout/canvas
+    parece nao estar totalmente assentado ainda enquanto o navegador esta no
+    meio do callback do XHR. Usa so drawTextBuffer() e nao changeCardIndex()
+    de novo: o segundo reconsultaria /sets e duplicaria o numero do
+    colecionador (ver _selecionar_impressao).
     """
     await page.evaluate(_TROCAR_PARA_FONTE_SEM_BUG)
     await page.evaluate("() => drawTextBuffer()")

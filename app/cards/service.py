@@ -61,9 +61,7 @@ async def _get(
             return resposta
         # Respeita o Retry-After quando vem, mas com teto: o Scryfall as vezes
         # manda um valor de dezenas de segundos, e nenhuma consulta daqui
-        # justifica ficar parado tanto tempo numa unica tentativa (foi o que
-        # fez list_sets() parecer travado no menu - poucas consultas com
-        # Retry-After alto bastavam pra render minutos no total).
+        # justifica ficar parado tanto tempo numa unica tentativa.
         espera = min(float(resposta.headers.get("Retry-After", 1 + tentativa)), ESPERA_MAXIMA_429)
         await asyncio.sleep(espera)
     return resposta
