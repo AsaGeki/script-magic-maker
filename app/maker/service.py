@@ -126,10 +126,12 @@ _SELECIONAR_IMPRESSAO = """(i) => {
 
 # importCard() do proprio site so cria <option> quando card.type_line e
 # verdadeiro - e processScryfallCard() faz `card.type_line = card.printed_type_line`
-# sem fallback nenhum pro ingles. Quando o Scryfall tem uma impressao pt
-# parcial (nome traduzido, type_line/oracle_text ainda null - o mesmo problema
-# de dado incompleto documentado em app.cards.models), a carta some do
-# dropdown em silencio e trava o resto do fluxo.
+# e `card.oracle_text = card.printed_text`, os dois sem fallback nenhum pro
+# ingles. Quando o Scryfall tem uma impressao pt parcial (nome traduzido,
+# type_line/oracle_text ainda null - o mesmo problema de dado incompleto
+# documentado em app.cards.models), a carta some do dropdown em silencio e
+# trava o resto do fluxo (type_line vazio) ou sai com a caixa de texto em
+# branco (oracle_text vazio) - os dois corrigidos aqui do mesmo jeito.
 #
 # Tambem e aqui, e nao depois via override, que a traducao do Arena entra
 # (quando pedida): fetchScryfallData ja roda processScryfallCard() antes de
@@ -143,11 +145,14 @@ _SELECIONAR_IMPRESSAO = """(i) => {
 # antiga "seventh" - verificado, reproduzivel, nao tem a ver com o conteudo
 # do texto em si.
 _IMPORTAR_CARTAS = """(args) => {
-    const { nome, idAlvo, tipoDeReserva, arenaId, arenaNome, arenaTexto, arenaFlavor } = args;
+    const { nome, idAlvo, tipoDeReserva, textoDeReserva, arenaId, arenaNome, arenaTexto, arenaFlavor } = args;
     fetchScryfallData(nome, (cards) => {
         cards.forEach((c) => {
             if (!c.type_line || c.type_line === 'Card') {
                 c.type_line = tipoDeReserva;
+            }
+            if (!c.oracle_text) {
+                c.oracle_text = textoDeReserva;
             }
             if (arenaId && c.id === arenaId) {
                 c.name = arenaNome;
@@ -475,6 +480,7 @@ async def _preencher(
                 "nome": nome_busca,
                 "idAlvo": carta.id,
                 "tipoDeReserva": carta.tipo_exibido or "Card",
+                "textoDeReserva": carta.texto_exibido or "",
                 "arenaId": carta.id if usar_arena else None,
                 "arenaNome": carta.arena.nome if usar_arena else None,
                 "arenaTexto": carta.arena.texto if usar_arena else None,
