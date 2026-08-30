@@ -30,3 +30,11 @@ ARENA_CACHE_DIR = Path(os.environ.get("ARENA_CACHE_DIR", "vendor/arena"))
 if not ARENA_CACHE_DIR.is_absolute():
     ARENA_CACHE_DIR = RAIZ / ARENA_CACHE_DIR
 ARENA_CACHE_MAX_DIAS = int(os.environ.get("ARENA_CACHE_MAX_DIAS", "7"))
+
+# Cache do indice de decks pre-construidos (MTGJSON) - mesmo motivo do cache
+# do Arena acima, so que o dado aqui muda bem menos (so quando sai produto
+# novo), entao o prazo padrao e maior.
+ESTRUTURAIS_CACHE_DIR = Path(os.environ.get("ESTRUTURAIS_CACHE_DIR", "vendor/estruturais"))
+if not ESTRUTURAIS_CACHE_DIR.is_absolute():
+    ESTRUTURAIS_CACHE_DIR = RAIZ / ESTRUTURAIS_CACHE_DIR
+ESTRUTURAIS_CACHE_MAX_DIAS = int(os.environ.get("ESTRUTURAIS_CACHE_MAX_DIAS", "14"))

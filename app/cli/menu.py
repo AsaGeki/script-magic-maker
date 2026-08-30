@@ -17,6 +17,12 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from app.cards.estruturais import (
+    DeckEstrutural,
+    buscar_entradas_do_deck,
+    list_decks_estruturais,
+    list_tipos_estruturais,
+)
 from app.cards.models import ScryfallCard
 from app.cards.service import (
     ULTIMA_EDICAO_EM_PORTUGUES,
@@ -33,7 +39,13 @@ from app.config import CARDCONJURER_URL, HEADLESS, OUTPUT_DIR
 from app.deck.service import buscar_cartas_do_deck
 from app.deck.texto import cartas_unicas, ler_arquivo
 from app.errors import AppError
-from app.maker.service import MOLDURAS, MOLDURA_PADRAO, fill_card, moldura_sugerida
+from app.maker.service import (
+    MOLDURAS,
+    MOLDURA_PADRAO,
+    PASTA_CARTAS_AVULSAS,
+    fill_card,
+    moldura_sugerida,
+)
 from app.print import layout
 from app.print import pdf as print_pdf
 from app.print.service import montar_lote, repetir_por_copias
@@ -321,24 +333,11 @@ FLUXOS_CARTAS = {
 # --- Fluxos de Decks -------------------------------------------------------
 
 
-async def _fluxo_deck_de_arquivo() -> None:
-    caminho_texto = await questionary.path("Arquivo da lista (.txt ou .dec):").ask_async()
-    if not caminho_texto:
-        return
-    entradas = cartas_unicas(ler_arquivo(Path(caminho_texto.strip().strip('"'))))
-    console.print(f"  {len(entradas)} cartas distintas na lista.")
-
-    async with cronometrar(console, "Resolvendo cartas no Scryfall"):
-        cartas, avisos = await buscar_cartas_do_deck(entradas)
-    for aviso in avisos:
-        console.print(f"  [yellow]![/] {aviso}")
-    if not cartas:
-        return
-
-    nome_do_deck = slug(Path(caminho_texto.strip().strip('"')).stem)
-    geradas = await _escolher_e_gerar(
-        cartas, pre_marcadas=True, pasta_destino=DECKS_DIR / nome_do_deck
-    )
+async def _finalizar_fluxo_deck(cartas: list[ScryfallCard], nome_do_deck: str, pasta_destino: Path) -> None:
+    """Rabo comum a todo fluxo de deck depois de resolvido no Scryfall: mostra
+    checkbox de selecao, gera as escolhidas e oferece montar o PDF com as
+    copias que o deck pede."""
+    geradas = await _escolher_e_gerar(cartas, pre_marcadas=True, pasta_destino=pasta_destino)
     if not geradas:
         return
 
@@ -354,32 +353,118 @@ async def _fluxo_deck_de_arquivo() -> None:
         console.print(f"  [green]OK[/] salvo em [bold]{destino}[/]")
 
 
-FLUXOS_DECKS = {"Importar lista de arquivo": _fluxo_deck_de_arquivo}
+async def _fluxo_deck_de_arquivo() -> None:
+    caminho_texto = await questionary.path("Arquivo da lista (.txt ou .dec):").ask_async()
+    if not caminho_texto:
+        return
+    entradas = cartas_unicas(ler_arquivo(Path(caminho_texto.strip().strip('"'))))
+    console.print(f"  {len(entradas)} cartas distintas na lista.")
+
+    async with cronometrar(console, "Resolvendo cartas no Scryfall"):
+        cartas, avisos = await buscar_cartas_do_deck(entradas)
+    for aviso in avisos:
+        console.print(f"  [yellow]![/] {aviso}")
+    if not cartas:
+        return
+
+    nome_do_deck = slug(Path(caminho_texto.strip().strip('"')).stem)
+    await _finalizar_fluxo_deck(cartas, nome_do_deck, DECKS_DIR / nome_do_deck)
+
+
+async def _fluxo_deck_estrutural() -> None:
+    """Decks pre-construidos oficiais (Commander, Planeswalker, Challenger...)
+    via MTGJSON - ver app.cards.estruturais. Navega por tipo e depois por
+    nome, porque o indice tem centenas de decks."""
+    async with cronometrar(console, "Carregando indice de decks estruturais"):
+        tipos = await list_tipos_estruturais()
+    if not tipos:
+        console.print("  [red]![/] Nao foi possivel carregar o indice de decks estruturais.")
+        return
+    tipo = await questionary.select("Qual tipo de deck?", choices=[*tipos, VOLTAR]).ask_async()
+    if tipo is None or tipo == VOLTAR:
+        return
+
+    decks = await list_decks_estruturais(tipo)
+    escolhido: DeckEstrutural | None = await questionary.select(
+        "Qual deck?",
+        choices=[
+            questionary.Choice(f"{d.nome} ({d.released_at[:4]})", d) for d in decks
+        ]
+        + [VOLTAR],
+    ).ask_async()
+    if escolhido is None or escolhido == VOLTAR:
+        return
+
+    async with cronometrar(console, f'Baixando "{escolhido.nome}"'):
+        entradas = cartas_unicas(await buscar_entradas_do_deck(escolhido.arquivo))
+    console.print(f"  {len(entradas)} cartas distintas na lista.")
+
+    async with cronometrar(console, "Resolvendo cartas no Scryfall"):
+        cartas, avisos = await buscar_cartas_do_deck(entradas)
+    for aviso in avisos:
+        console.print(f"  [yellow]![/] {aviso}")
+    if not cartas:
+        return
+
+    nome_do_deck = slug(escolhido.nome)
+    await _finalizar_fluxo_deck(cartas, nome_do_deck, DECKS_DIR / "decks-estruturais" / nome_do_deck)
+
+
+FLUXOS_DECKS = {
+    "Importar lista de arquivo": _fluxo_deck_de_arquivo,
+    "Buscar por estrutural": _fluxo_deck_estrutural,
+}
 
 
 # --- Fluxos de PDF ---------------------------------------------------------
 
 
-def _pastas_com_cartas() -> list[Path]:
+def _pastas_de_deck() -> list[Path]:
+    """Toda pasta com png que nao seja a de cartas avulsas (PASTA_CARTAS_AVULSAS)
+    - 1 por deck, veja o comentario de _opcoes_selecao pro motivo. Pega
+    qualquer profundidade porque cada fluxo de deck monta a propria (import de
+    arquivo cai direto em DECKS_DIR/<nome>, estrutural em
+    DECKS_DIR/decks-estruturais/<nome>)."""
     raiz = Path(OUTPUT_DIR)
-    return [p for p in sorted(raiz.rglob("*")) if p.is_dir() and any(p.glob("*.png"))]
+    return [
+        p
+        for p in sorted(raiz.rglob("*"))
+        if p.is_dir() and p != PASTA_CARTAS_AVULSAS and any(p.glob("*.png"))
+    ]
+
+
+def _opcoes_selecao() -> list[questionary.Choice]:
+    """1 opcao por carta avulsa (cards/*.png) + 1 opcao por deck INTEIRO (cada
+    pasta de _pastas_de_deck, todas as cartas dali juntas numa escolha so) -
+    mesmo esquema do script-yugioh-maker: escolher o deck marca ele de 1 vez,
+    sem precisar marcar carta por carta. O valor de cada Choice ja e a lista
+    de caminhos que aquela opcao representa (1 elemento se for carta avulsa)."""
+    opcoes = []
+    if PASTA_CARTAS_AVULSAS.exists():
+        opcoes += [
+            questionary.Choice(f"cards/{caminho.name}", [caminho])
+            for caminho in sorted(PASTA_CARTAS_AVULSAS.glob("*.png"))
+        ]
+    for pasta_deck in _pastas_de_deck():
+        imagens = sorted(pasta_deck.glob("*.png"))
+        rotulo = pasta_deck.relative_to(OUTPUT_DIR).as_posix()
+        opcoes.append(
+            questionary.Choice(f"[deck] {rotulo} ({len(imagens)} cartas)", imagens)
+        )
+    return opcoes
 
 
 async def _escolher_cartas_para_imprimir() -> list[Path]:
-    pastas = _pastas_com_cartas()
-    if not pastas:
+    opcoes = _opcoes_selecao()
+    if not opcoes:
         console.print(f"  [red]![/] Nenhuma carta gerada em {OUTPUT_DIR}.")
         return []
-    escolhidas = await questionary.checkbox(
-        "Selecione as pastas a imprimir:",
-        choices=[
-            questionary.Choice(f"{p} ({len(list(p.glob('*.png')))} cartas)", p)
-            for p in pastas
-        ],
+    escolhidos = await questionary.checkbox(
+        "Selecione cartas avulsas e/ou decks inteiros:", choices=opcoes
     ).ask_async()
-    if not escolhidas:
+    if not escolhidos:
         return []
-    return [caminho for pasta in escolhidas for caminho in sorted(pasta.glob("*.png"))]
+    return [caminho for grupo in escolhidos for caminho in grupo]
 
 
 INSTRUCOES_PREVIEW = """\
