@@ -12,10 +12,10 @@ mesmo `toDataURL`, mas passando por um `<a download>` que nao interessa aqui.
 
 import asyncio
 import base64
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import httpx
 from playwright.async_api import Browser, Page, Route, async_playwright
 
 from app.cards.enums import Layout
@@ -24,9 +24,9 @@ from app.config import (
     CARDCONJURER_URL,
     HEADLESS,
     OUTPUT_DIR,
-    SCRYFALL_USER_AGENT,
 )
 from app.errors import BadRequestError, UpstreamError
+from app.maker import arte
 from app.slug import slug
 from app.vendor.server import ServidorCardConjurer
 
@@ -140,7 +140,7 @@ _SELECIONAR_IMPRESSAO = """(i) => {
 # proprio site aplicar curlyQuotes, itailico de reminder text e formatacao de
 # flavor uma vez so - a mesma coisa que ele faz pra carta com pt de verdade.
 _IMPORTAR_CARTAS = """(args) => {
-    const { nome, idAlvo, tipoDeReserva, textoDeReserva, arenaId, arenaNome, arenaTexto, arenaFlavor } = args;
+    const { nome, idAlvo, tipoDeReserva, textoDeReserva, tipoTraduzido, arenaId, arenaNome, arenaTexto, arenaFlavor } = args;
     fetchScryfallData(nome, (cards) => {
         cards.forEach((c) => {
             if (!c.type_line || c.type_line === 'Card') {
@@ -148,6 +148,13 @@ _IMPORTAR_CARTAS = """(args) => {
             }
             if (!c.oracle_text) {
                 c.oracle_text = textoDeReserva;
+            }
+            // Linha de tipo traduzida fora do Scryfall (ficha, ver
+            // app.cards.fichas): a impressao e em ingles, entao o
+            // processScryfallCard() do proprio site nao tem printed_type_line
+            // pra aplicar sozinho.
+            if (tipoTraduzido && c.id === idAlvo) {
+                c.type_line = tipoTraduzido;
             }
             if (arenaId && c.id === arenaId) {
                 c.name = arenaNome;
@@ -169,10 +176,109 @@ _IMPORTAR_CARTAS = """(args) => {
     }, 'prints');
 }"""
 
+# autoFrame() e cardFrameProperties() (do proprio gerador) decidem a moldura
+# procurando "Land", "Artifact", "Vehicle", "Creature" e "Add" DENTRO da linha
+# de tipo e do texto de regras, tudo literal em ingles. Com a carta em
+# portugues nenhuma dessas comparacoes bate: terreno vira moldura de artefato,
+# veiculo perde a caixa de P/R propria, e a cor do terreno (que sai do "Add"
+# do texto) nunca e encontrada. Emprestar a linha de tipo e o texto em ingles
+# so durante a chamada resolve todas de uma vez, sem tocar em vendor/.
+#
+# Restaurar logo depois e seguro porque as funcoes de moldura recebem o texto
+# por argumento - o valor ja foi lido quando esta linha roda. E escrever em
+# card.text[...].text direto (em vez de passar pela caixa de texto da
+# interface) nao dispara textEdited(), que agendaria um autoFrame() novo, com
+# o portugues de volta, 500ms depois.
+_APLICAR_MOLDURA = """(args) => {
+    const tipoPt = card.text.type.text;
+    const regrasPt = card.text.rules.text;
+    card.text.type.text = args.tipoIngles;
+    card.text.rules.text = args.regrasIngles;
+    autoFrame();
+    card.text.type.text = tipoPt;
+    card.text.rules.text = regrasPt;
+}"""
+
+# O gerador desenha o custo de mana por cima do titulo, cada um na sua caixa, e
+# nao encolhe uma por causa da outra - em ingles os nomes cabem, em portugues
+# nao (pior na moldura Seventh, de titulo maior). Encurtar a caixa do titulo
+# ate onde o custo comeca faz o proprio writeText() reduzir a fonte ate caber.
+#
+# A conta do avanco por simbolo e a mesma do writeText(): largura do simbolo
+# 0.78 do corpo da fonte, mais o espacamento dos dois lados.
+_AJUSTAR_TITULO = """() => {
+    const titulo = card.text.title;
+    const mana = card.text.mana;
+    if (!titulo || !mana || !mana.text) { return; }
+    const simbolos = (mana.text.match(/{[^}]*}/g) || []).length;
+    if (!simbolos) { return; }
+
+    const corpo = card.height * (mana.size || 0.038);
+    const espacamento = corpo * 0.04 + card.width * (mana.manaSpacing || 0);
+    const larguraDoCusto = simbolos * (corpo * 0.78 + espacamento * 2);
+    const inicioDoCusto = card.width * ((mana.x || 0) + mana.width) - larguraDoCusto;
+    const folga = card.width * 0.012;
+    const fimDoTitulo = card.width * (titulo.x + titulo.width);
+    if (fimDoTitulo > inicioDoCusto - folga) {
+        titulo.width = (inicioDoCusto - folga) / card.width - titulo.x;
+    }
+}"""
+
+# Terreno basico nao tem texto de regras impresso: a caixa leva o simbolo de
+# mana grande. Quem desenha isso no gerador e a marca d'agua, e ela precisa da
+# imagem e de uma cor - com watermarkLeft em 'none' o watermarkEdited() nao
+# pinta nada, e com 'default' sai o svg cru, que e preto. Os cinco hex sao os
+# que o proprio seletor de marca d'agua do gerador usa pra cada cor.
+MARCA_DAGUA_DE_TERRENO = {
+    "W": ("/img/watermarks/w.svg", "#b79d58"),
+    "U": ("/img/watermarks/u.svg", "#8cacc5"),
+    "B": ("/img/watermarks/b.svg", "#5e5e5e"),
+    "R": ("/img/watermarks/r.svg", "#c66d39"),
+    "G": ("/img/watermarks/g.svg", "#598c52"),
+}
+
+# A cor entra antes da imagem: uploadWatermark() so reposiciona no onload, e
+# watermarkLeftColor() ja redesenha com o que estiver carregado.
+_APLICAR_MARCA_DAGUA = """(args) => {
+    document.querySelector('#watermark-left').value = args.cor;
+    watermarkLeftColor(args.cor);
+    uploadWatermark(args.imagem, 'resetWatermark');
+}"""
+
 INTERVALO_AMOSTRA = 0.3
 AMOSTRAS_IGUAIS = 3  # leituras seguidas sem mudanca = desenho terminou
 TEMPO_LIMITE_DESENHO = 45.0
 TEMPO_LIMITE_ELEMENTO = 30_000  # milissegundos, como o Playwright espera
+
+
+def _e_terreno_basico(carta: ScryfallCard) -> bool:
+    return (carta.type_line or "").lower().startswith("basic land")
+
+
+def _marca_dagua(carta: ScryfallCard) -> tuple[str, str] | None:
+    """Imagem e cor da marca d'agua desta carta, ou None pra deixar sem.
+
+    So terreno basico usa por enquanto, e a cor sai do proprio simbolo de mana
+    do oracle_text ("({T}: Add {R}.)") - assim nao ha tabela de subtipo pra
+    manter. Wastes fica de fora: o gerador nao tem svg de incolor.
+    """
+    if not _e_terreno_basico(carta):
+        return None
+    simbolo = re.search(r"\{([WUBRG])\}", carta.oracle_text or "")
+    return MARCA_DAGUA_DE_TERRENO.get(simbolo.group(1)) if simbolo else None
+
+
+def _texto_de_reserva(carta: ScryfallCard) -> str:
+    """Texto de regras pro caso do Scryfall nao trazer o traduzido.
+
+    Terreno basico fica de fora: printed_text nulo ali nao e dado faltando, e
+    a carta realmente nao ter texto (a caixa leva so o simbolo de mana). Sem
+    essa excecao o lembrete em ingles do oracle_text - "({T}: Add {W}.)" -
+    acabava impresso na carta.
+    """
+    if _e_terreno_basico(carta):
+        return ""
+    return carta.texto_exibido or ""
 
 
 async def _filtrar_rede(rota: Route) -> None:
@@ -324,29 +430,30 @@ async def _selecionar_impressao(page: Page, carta: ScryfallCard) -> bool:
     return True
 
 
-async def _aplicar_arte_mtgpics(page: Page, carta: ScryfallCard) -> bool:
-    """Troca a arte do Scryfall pela do MTGPics, que e bem maior.
+async def _aplicar_arte(page: Page, carta: ScryfallCard) -> bool:
+    """Troca a arte que o gerador achou sozinho pela maior disponivel.
 
-    O gerador ate tenta o MTGPics sozinho, mas passando por um proxy de CORS de
-    terceiro. Baixar aqui e entregar a imagem pronta evita esse intermediario.
-    Quando o MTGPics nao tem a carta, fica o art_crop.
+    O gerador ate tenta o MTGPics, mas passando por um proxy de CORS de
+    terceiro e so pelo numero da propria impressao. Quem escolhe e confere a
+    arte aqui e app.maker.arte; este passo so entrega a imagem pronta.
     """
-    try:
-        async with httpx.AsyncClient(
-            timeout=20.0, follow_redirects=True, headers={"User-Agent": SCRYFALL_USER_AGENT}
-        ) as client:
-            resposta = await client.get(carta.arte_mtgpics)
-    except httpx.HTTPError:
+    data_url = await arte.buscar(carta)
+    if data_url is None:
         return False
-
-    tipo = resposta.headers.get("content-type", "")
-    if resposta.status_code != 200 or not tipo.startswith("image/"):
-        return False
-
-    data_url = f"data:{tipo};base64,{base64.b64encode(resposta.content).decode()}"
     await page.evaluate("(src) => uploadArt(src, 'autoFit')", data_url)
     await _esperar_desenho(page)
     return True
+
+
+async def _aplicar_marca_dagua(page: Page, carta: ScryfallCard) -> None:
+    """Precisa rodar depois da moldura: os limites onde a marca d'agua e
+    encaixada (card.watermarkBounds) vem do pacote de molduras."""
+    marca = _marca_dagua(carta)
+    if marca is None:
+        return
+    imagem, cor = marca
+    await page.evaluate(_APLICAR_MARCA_DAGUA, {"imagem": imagem, "cor": cor})
+    await _esperar_desenho(page)
 
 
 async def _redesenhar_texto_final(page: Page) -> None:
@@ -366,7 +473,23 @@ async def _redesenhar_texto_final(page: Page) -> None:
     colecionador (ver _selecionar_impressao).
     """
     await page.evaluate(_TROCAR_PARA_FONTE_SEM_BUG)
+    await page.evaluate(_AJUSTAR_TITULO)
     await page.evaluate("() => drawTextBuffer()")
+    await _esperar_desenho(page)
+
+
+async def _aplicar_moldura(page: Page, carta: ScryfallCard) -> None:
+    """Refaz a moldura automatica com a linha de tipo em ingles (ver
+    _APLICAR_MOLDURA). Precisa rodar depois do import: e ele que enche
+    card.text.type, e a moldura escolhida na abertura da pagina saiu com a
+    carta ainda vazia."""
+    await page.evaluate(
+        _APLICAR_MOLDURA,
+        {
+            "tipoIngles": carta.type_line or "",
+            "regrasIngles": carta.oracle_text or "",
+        },
+    )
     await _esperar_desenho(page)
 
 
@@ -377,7 +500,7 @@ async def _esperar_fontes(page: Page) -> None:
     await page.evaluate("() => document.fonts.ready")
 
 
-async def _salvar(page: Page, carta: ScryfallCard, pasta_destino: Path | None) -> Path:
+async def _salvar(page: Page, carta: ScryfallCard, pasta_destino: Path | None, moldura: str) -> Path:
     await _esperar_fontes(page)
     data_url = await page.evaluate("() => cardCanvas.toDataURL('image/png')")
     if not data_url or not data_url.startswith("data:image/png;base64,"):
@@ -385,7 +508,12 @@ async def _salvar(page: Page, carta: ScryfallCard, pasta_destino: Path | None) -
 
     pasta = pasta_destino or PASTA_CARTAS_AVULSAS
     pasta.mkdir(parents=True, exist_ok=True)
-    destino = pasta / f"{slug(f'{carta.nome_exibido}-{carta.set}-{carta.collector_number}')}.png"
+    nome_base = f"{carta.nome_exibido}-{carta.set}-{carta.collector_number}"
+    # Moldura diferente da automatica muda a imagem pra mesma impressao - sem
+    # o sufixo, gerar de novo com outra moldura sobrescreveria a primeira.
+    if moldura != moldura_sugerida(carta):
+        nome_base += f"-{moldura}"
+    destino = pasta / f"{slug(nome_base)}.png"
     destino.write_bytes(base64.b64decode(data_url.split(",", 1)[1]))
     return destino
 
@@ -466,7 +594,13 @@ async def _preencher(
                 "nome": nome_busca,
                 "idAlvo": carta.id,
                 "tipoDeReserva": carta.tipo_exibido or "Card",
-                "textoDeReserva": carta.texto_exibido or "",
+                "textoDeReserva": _texto_de_reserva(carta),
+                # Impressao em ingles com printed_type_line preenchido so
+                # acontece quando alguem montou a traducao por fora - hoje as
+                # fichas (app.cards.fichas).
+                "tipoTraduzido": (
+                    carta.printed_type_line if carta.lang == "en" else None
+                ),
                 "arenaId": carta.id if usar_arena else None,
                 "arenaNome": carta.arena.nome if usar_arena else None,
                 "arenaTexto": carta.arena.texto if usar_arena else None,
@@ -488,9 +622,11 @@ async def _preencher(
         await _esperar_desenho(page)
         if await _selecionar_impressao(page, carta):
             await _esperar_desenho(page)
+        await _aplicar_moldura(page, carta)
+        await _aplicar_marca_dagua(page, carta)
         await _redesenhar_texto_final(page)
         if arte_mtgpics:
-            await _aplicar_arte_mtgpics(page, carta)
-        return await _salvar(page, carta, pasta_destino)
+            await _aplicar_arte(page, carta)
+        return await _salvar(page, carta, pasta_destino, moldura)
     finally:
         await page.context.close()

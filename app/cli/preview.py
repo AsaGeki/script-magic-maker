@@ -135,6 +135,12 @@ async def mostrar_impressoes_em_grade(
             print("  ".join(bloco[linha] for bloco in blocos))
 
 
+# Teto de artes desenhadas no terminal. Terreno basico passa de 280
+# impressoes; baixar e desenhar todas trava o fluxo por minutos e nao cabe na
+# tela. A lista de escolha continua com todas.
+MAXIMO_COM_ARTE = 12
+
+
 async def escolher_impressao(impressoes: list[ScryfallCard]) -> ScryfallCard:
     """Se so ha 1 impressao, devolve ela direto. Se ha mais (reimpressao com
     arte alternativa), mostra o preview de cada uma e deixa escolher."""
@@ -144,7 +150,12 @@ async def escolher_impressao(impressoes: list[ScryfallCard]) -> ScryfallCard:
     console.print(
         f"\n[bold]'{impressoes[0].nome_exibido}' tem {len(impressoes)} impressoes:[/]"
     )
-    await mostrar_impressoes_em_grade(impressoes)
+    com_arte = impressoes[:MAXIMO_COM_ARTE]
+    if len(com_arte) < len(impressoes):
+        console.print(
+            f"  [dim]Arte das {len(com_arte)} primeiras; a lista abaixo tem todas.[/]"
+        )
+    await mostrar_impressoes_em_grade(com_arte)
 
     escolha = await questionary.select(
         "Qual impressao usar?",

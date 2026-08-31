@@ -67,12 +67,19 @@ full art) — só pergunta se você quiser trocar. `cli.py fill "nome"` gera
 direto, sem menu. O servidor local do Card Conjurer sobe e desce sozinho junto da
 automação.
 
+Importando um deck ainda dá pra escolher a impressão das cartas que a lista
+deixou sem edição (ver [DECK.md](DECK.md)) e gerar junto as fichas que as
+cartas criam — a quantidade de cada ficha é sempre perguntada, porque a carta
+diz que cria ficha, não quantas você vai querer na mesa.
+
 Os demais comandos:
 
 | Comando | O que faz |
 |---|---|
 | `cli.py setup` | Clona o Card Conjurer em `vendor/` |
 | `cli.py serve` | Sobe a API de consulta dos dados |
+
+Formato esperado da lista de deck (`.txt`/`.dec`): ver [DECK.md](DECK.md).
 
 As imagens caem em `output/cards/` (carta avulsa) e `output/decks/<deck>/`
 (lista importada); o PDF fica na raiz de `output/`.

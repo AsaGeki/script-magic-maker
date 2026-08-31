@@ -23,6 +23,8 @@ from app.cards.estruturais import (
     list_decks_estruturais,
     list_tipos_estruturais,
 )
+from app.cards import fichas
+from app.cards.fichas import FichaDoDeck
 from app.cards.models import ScryfallCard
 from app.cards.service import (
     ULTIMA_EDICAO_EM_PORTUGUES,
@@ -37,7 +39,14 @@ from app.cli.stdio import configurar_stdio_utf8
 from app.cli.tempo import cronometrar
 from app.config import CARDCONJURER_URL, HEADLESS, OUTPUT_DIR
 from app.deck.service import buscar_cartas_do_deck
-from app.deck.texto import cartas_unicas, ler_arquivo
+from app.deck.texto import (
+    Chave,
+    EntradaDeDeck,
+    cartas_unicas,
+    chave_da_entrada,
+    ler_arquivo,
+    travar_impressoes,
+)
 from app.errors import AppError
 from app.maker.service import (
     MOLDURAS,
@@ -48,7 +57,8 @@ from app.maker.service import (
 )
 from app.print import layout
 from app.print import pdf as print_pdf
-from app.print.service import montar_lote, repetir_por_copias
+from app.print import verso
+from app.print.service import escrever_copias, ler_copias, montar_lote, repetir_por_copias
 from app.slug import slug
 from app.vendor.server import ServidorCardConjurer
 
@@ -333,6 +343,93 @@ FLUXOS_CARTAS = {
 # --- Fluxos de Decks -------------------------------------------------------
 
 
+async def _escolher_impressoes(
+    pares: list[tuple[EntradaDeDeck, ScryfallCard]],
+) -> dict[Chave, tuple[str, str]]:
+    """Troca a impressao das cartas que a lista deixou sem edicao travada.
+
+    Linha sem "(EDICAO) NUMERO" cai na primeira impressao que o Scryfall
+    devolver, sem escolha nem preview (ver DECK.md) - o que pesa em terreno
+    basico e em carta com muitas variantes. Aqui da pra marcar em quais isso
+    importa e escolher olhando a arte; as nao marcadas seguem no automatico.
+
+    Troca a carta no proprio `pares` e devolve as escolhas por chave de linha,
+    pra quem tiver o arquivo em maos poder travar a escolha nele.
+    """
+    soltas = [(entrada, carta) for entrada, carta in pares if not entrada.set]
+    if not soltas:
+        return {}
+
+    marcadas = await questionary.checkbox(
+        "Escolher a impressao de quais cartas?",
+        choices=[
+            questionary.Choice(
+                f"{carta.nome_exibido} - hoje {carta.set.upper()} #{carta.collector_number}",
+                chave_da_entrada(entrada),
+            )
+            for entrada, carta in soltas
+        ],
+    ).ask_async()
+    if not marcadas:
+        return {}
+
+    trocas: dict[Chave, tuple[str, str]] = {}
+    marcadas = set(marcadas)
+    for indice, (entrada, carta) in enumerate(pares):
+        chave = chave_da_entrada(entrada)
+        if chave not in marcadas:
+            continue
+        impressoes = await search_cards(carta.name, lang=carta.lang)
+        if len(impressoes) <= 1:
+            console.print(f'  [dim]"{carta.nome_exibido}" so tem 1 impressao.[/]')
+            continue
+        escolhida = await escolher_impressao(impressoes)
+        escolhida.copias = carta.copias
+        pares[indice] = (entrada, escolhida)
+        trocas[chave] = (escolhida.set, escolhida.collector_number)
+    return trocas
+
+
+def _nome_da_ficha(ficha: FichaDoDeck) -> str:
+    return ficha.carta.arena.nome if ficha.carta.arena else ficha.carta.nome_exibido
+
+
+async def _escolher_fichas(cartas: list[ScryfallCard]) -> list[ScryfallCard]:
+    """Fichas que as cartas do deck criam, pra imprimir junto.
+
+    Quantas copias de cada uma nao da pra deduzir do deck - a carta diz que
+    cria ficha, nao quantas voce vai querer na mesa -, entao a quantidade e
+    sempre perguntada, com 1 de padrao.
+    """
+    async with cronometrar(console, "Procurando fichas que o deck cria"):
+        achadas = await fichas.descobrir(cartas)
+    if not achadas:
+        return []
+
+    marcadas = await questionary.checkbox(
+        "Gerar quais fichas?",
+        choices=[
+            questionary.Choice(
+                f"{_nome_da_ficha(ficha)} - de {', '.join(ficha.criada_por)}", ficha
+            )
+            for ficha in achadas
+        ],
+    ).ask_async()
+    if not marcadas:
+        return []
+
+    escolhidas = []
+    for ficha in marcadas:
+        resposta = await questionary.text(
+            f"Quantas copias de {_nome_da_ficha(ficha)}?",
+            default="1",
+            validate=_validar_quantidade,
+        ).ask_async()
+        ficha.carta.copias = int(resposta) if resposta else 1
+        escolhidas.append(ficha.carta)
+    return escolhidas
+
+
 async def _finalizar_fluxo_deck(cartas: list[ScryfallCard], nome_do_deck: str, pasta_destino: Path) -> None:
     """Rabo comum a todo fluxo de deck depois de resolvido no Scryfall: mostra
     checkbox de selecao, gera as escolhidas e oferece montar o PDF com as
@@ -340,9 +437,8 @@ async def _finalizar_fluxo_deck(cartas: list[ScryfallCard], nome_do_deck: str, p
     geradas = await _escolher_e_gerar(cartas, pre_marcadas=True, pasta_destino=pasta_destino)
     if not geradas:
         return
+    escrever_copias(pasta_destino, geradas)
 
-    # Aqui ainda temos quantas copias o deck pede de cada carta; o fluxo de PDF
-    # sozinho so enxerga os arquivos da pasta, 1 de cada.
     total = sum(copias for _, copias in geradas)
     if await questionary.confirm(
         f"Montar o PDF agora, com as {total} copias que o deck pede?", default=True
@@ -357,17 +453,26 @@ async def _fluxo_deck_de_arquivo() -> None:
     caminho_texto = await questionary.path("Arquivo da lista (.txt ou .dec):").ask_async()
     if not caminho_texto:
         return
-    entradas = cartas_unicas(ler_arquivo(Path(caminho_texto.strip().strip('"'))))
+    caminho = Path(caminho_texto.strip().strip('"'))
+    entradas = cartas_unicas(ler_arquivo(caminho))
     console.print(f"  {len(entradas)} cartas distintas na lista.")
 
     async with cronometrar(console, "Resolvendo cartas no Scryfall"):
-        cartas, avisos = await buscar_cartas_do_deck(entradas)
+        pares, avisos = await buscar_cartas_do_deck(entradas)
     for aviso in avisos:
         console.print(f"  [yellow]![/] {aviso}")
-    if not cartas:
+    if not pares:
         return
 
-    nome_do_deck = slug(Path(caminho_texto.strip().strip('"')).stem)
+    trocas = await _escolher_impressoes(pares)
+    if trocas:
+        linhas = travar_impressoes(caminho, trocas)
+        console.print(f"  [green]OK[/] {linhas} linha(s) travadas em [bold]{caminho.name}[/].")
+
+    cartas = [carta for _, carta in pares]
+    cartas += await _escolher_fichas(cartas)
+
+    nome_do_deck = slug(caminho.stem)
     await _finalizar_fluxo_deck(cartas, nome_do_deck, DECKS_DIR / nome_do_deck)
 
 
@@ -400,14 +505,23 @@ async def _fluxo_deck_estrutural() -> None:
     console.print(f"  {len(entradas)} cartas distintas na lista.")
 
     async with cronometrar(console, "Resolvendo cartas no Scryfall"):
-        cartas, avisos = await buscar_cartas_do_deck(entradas)
+        pares, avisos = await buscar_cartas_do_deck(entradas)
     for aviso in avisos:
         console.print(f"  [yellow]![/] {aviso}")
-    if not cartas:
+    if not pares:
         return
 
+    # Deck estrutural vem do MTGJSON, nao de um .txt local: nao ha arquivo
+    # pra travar a impressao escolhida nele (ver travar_impressoes).
+    await _escolher_impressoes(pares)
+
+    cartas = [carta for _, carta in pares]
+    cartas += await _escolher_fichas(cartas)
+
     nome_do_deck = slug(escolhido.nome)
-    await _finalizar_fluxo_deck(cartas, nome_do_deck, DECKS_DIR / "decks-estruturais" / nome_do_deck)
+    await _finalizar_fluxo_deck(
+        cartas, nome_do_deck, DECKS_DIR / "decks-estruturais" / nome_do_deck
+    )
 
 
 FLUXOS_DECKS = {
@@ -438,23 +552,35 @@ def _opcoes_selecao() -> list[questionary.Choice]:
     pasta de _pastas_de_deck, todas as cartas dali juntas numa escolha so) -
     mesmo esquema do script-yugioh-maker: escolher o deck marca ele de 1 vez,
     sem precisar marcar carta por carta. O valor de cada Choice ja e a lista
-    de caminhos que aquela opcao representa (1 elemento se for carta avulsa)."""
+    de (caminho, copias) que aquela opcao representa - avulsa usa copias=None
+    (pergunta depois), deck usa o que tiver salvo em copias.txt (1 se nao
+    tiver, ver app.print.service)."""
     opcoes = []
     if PASTA_CARTAS_AVULSAS.exists():
         opcoes += [
-            questionary.Choice(f"cards/{caminho.name}", [caminho])
+            questionary.Choice(f"cards/{caminho.name}", [(caminho, None)])
             for caminho in sorted(PASTA_CARTAS_AVULSAS.glob("*.png"))
         ]
     for pasta_deck in _pastas_de_deck():
         imagens = sorted(pasta_deck.glob("*.png"))
+        copias = ler_copias(pasta_deck)
         rotulo = pasta_deck.relative_to(OUTPUT_DIR).as_posix()
         opcoes.append(
-            questionary.Choice(f"[deck] {rotulo} ({len(imagens)} cartas)", imagens)
+            questionary.Choice(
+                f"[deck] {rotulo} ({len(imagens)} cartas)",
+                [(imagem, copias.get(imagem.name, 1)) for imagem in imagens],
+            )
         )
     return opcoes
 
 
-async def _escolher_cartas_para_imprimir() -> list[Path]:
+def _validar_quantidade(texto: str) -> bool | str:
+    if not texto or (texto.isdigit() and int(texto) > 0):
+        return True
+    return "Numero inteiro maior que 0 (ou vazio pra 1)"
+
+
+async def _escolher_cartas_para_imprimir() -> list[tuple[Path, int]]:
     opcoes = _opcoes_selecao()
     if not opcoes:
         console.print(f"  [red]![/] Nenhuma carta gerada em {OUTPUT_DIR}.")
@@ -464,7 +590,19 @@ async def _escolher_cartas_para_imprimir() -> list[Path]:
     ).ask_async()
     if not escolhidos:
         return []
-    return [caminho for grupo in escolhidos for caminho in grupo]
+    pares = [par for grupo in escolhidos for par in grupo]
+
+    resultado: list[tuple[Path, int]] = []
+    for caminho, copias in pares:
+        if copias is None:
+            resposta = await questionary.text(
+                f"Quantas copias de {caminho.stem}?",
+                default="1",
+                validate=_validar_quantidade,
+            ).ask_async()
+            copias = int(resposta) if resposta else 1
+        resultado.append((caminho, copias))
+    return resultado
 
 
 INSTRUCOES_PREVIEW = """\
@@ -480,11 +618,11 @@ INSTRUCOES_PREVIEW = """\
 
 
 async def _fluxo_montar_pdf() -> None:
-    cartas = await _escolher_cartas_para_imprimir()
-    if not cartas:
+    pares = await _escolher_cartas_para_imprimir()
+    if not pares:
         return
     async with cronometrar(console, "Montando o PDF"):
-        destino = print_pdf.exportar_pdf(montar_lote(cartas), "cartas.pdf")
+        destino = print_pdf.exportar_pdf(montar_lote(repetir_por_copias(pares)), "cartas.pdf")
     console.print(f"  [green]OK[/] salvo em [bold]{destino}[/]")
 
 
@@ -492,9 +630,10 @@ async def _fluxo_preview() -> None:
     console.print(
         Panel(INSTRUCOES_PREVIEW, title="Prova de impressao", border_style="yellow")
     )
-    cartas = await _escolher_cartas_para_imprimir()
-    if not cartas:
+    pares = await _escolher_cartas_para_imprimir()
+    if not pares:
         return
+    cartas = repetir_por_copias(pares)
     cartas_teste = cartas[: layout.CARTAS_POR_FOLHA]
     if len(cartas_teste) < len(cartas):
         console.print(
@@ -506,8 +645,19 @@ async def _fluxo_preview() -> None:
     console.print(f"  [green]OK[/] salvo em [bold]{destino}[/]")
 
 
+async def _fluxo_gerar_verso() -> None:
+    async with cronometrar(console, "Montando o verso generico"):
+        destino = print_pdf.exportar_pdf([verso.montar_folha()], "verso.pdf")
+    console.print(
+        f"  [green]OK[/] salvo em [bold]{destino}[/] - so 1 folha, porque toda "
+        "celula sai igual: imprima ela no verso de qualquer folha de frente, "
+        "quantas vezes precisar."
+    )
+
+
 FLUXOS_IMPRIMIR = {
     "Montar PDF": _fluxo_montar_pdf,
+    "Gerar verso generico": _fluxo_gerar_verso,
     "Preview (so 1 folha)": _fluxo_preview,
 }
 

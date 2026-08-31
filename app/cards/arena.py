@@ -119,11 +119,38 @@ def _construir_indice(banco_pt: dict) -> dict[tuple[str, str], dict]:
     for carta in banco_pt.get("cards", {}).values():
         if carta.get("IsDigitalOnly") or not carta.get("CollectorNumber"):
             continue
-        set_scryfall = codigo_para_scryfall.get(carta.get("Set", ""))
-        if not set_scryfall:
-            continue
-        indice[(set_scryfall.lower(), carta["CollectorNumber"])] = carta
+        chave = _onde_mora_no_scryfall(carta, codigo_para_scryfall)
+        if chave is not None:
+            indice[chave] = carta
     return indice
+
+
+def _onde_mora_no_scryfall(
+    carta: dict, codigo_para_scryfall: dict[str, str]
+) -> tuple[str, str] | None:
+    """Em que (edicao, numero) do Scryfall esta impressao do Arena mora.
+
+    Ficha pede tratamento a parte: no Scryfall ela vive numa edicao propria
+    ("TKHM" pra ficha de Khaldheim), mas o Arena guarda com o `Set` da
+    edicao-mae e um numero que colide com o de uma carta de verdade - a ficha
+    Tesouro de KHM #19 sobrescrevia a carta KHM #19 no indice, e a busca
+    devolvia "Tesouro" no lugar da carta. Quem sabe a edicao certa da ficha e
+    o campo `Art`.
+
+    Fora ficha o `Art` nao serve: em 4.327 das 26.517 cartas ele aponta pra
+    onde o Arena pegou a ilustracao, nao pra impressao (Estouro de
+    Rinocerontes e MIR #210, com arte de BTD #51).
+    """
+    if carta.get("IsToken"):
+        arte = carta.get("Art") or {}
+        if not (arte.get("s") and arte.get("n")):
+            return None
+        return (str(arte["s"]).lower(), str(arte["n"]))
+
+    set_scryfall = codigo_para_scryfall.get(carta.get("Set", ""))
+    if not set_scryfall:
+        return None
+    return (set_scryfall.lower(), str(carta["CollectorNumber"]))
 
 
 def _transformar_texto(bruto: str, nome_traduzido: str) -> str:

@@ -106,17 +106,64 @@ def ler_arquivo(caminho: Path) -> list[EntradaDeDeck]:
     return analisar_lista(caminho.read_text(encoding="utf-8"))
 
 
+Chave = tuple[str, str | None, str | None]
+
+
+def chave_da_entrada(entrada: EntradaDeDeck) -> Chave:
+    """O que faz duas linhas serem a mesma carta: nome, edicao e numero.
+
+    Linha sem edicao e linha travada numa impressao contam como cartas
+    diferentes de proposito - dividir copias entre variantes e o jeito
+    documentado de misturar arte da mesma carta num deck (ver DECK.md).
+    """
+    return (entrada.nome.lower(), entrada.set, entrada.collector_number)
+
+
 def cartas_unicas(entradas: list[EntradaDeDeck]) -> list[EntradaDeDeck]:
     """Junta repeticoes da mesma carta, somando as quantidades.
 
     A imagem e gerada uma vez por carta, nao uma por copia; quantas copias
     imprimir e problema da folha (ver app.print).
     """
-    juntas: dict[tuple[str, str | None, str | None], EntradaDeDeck] = {}
+    juntas: dict[Chave, EntradaDeDeck] = {}
     for entrada in entradas:
-        chave = (entrada.nome.lower(), entrada.set, entrada.collector_number)
+        chave = chave_da_entrada(entrada)
         if chave in juntas:
             juntas[chave].quantidade += entrada.quantidade
         else:
             juntas[chave] = EntradaDeDeck(**vars(entrada))
     return list(juntas.values())
+
+
+def travar_impressoes(caminho: Path, escolhas: dict[Chave, tuple[str, str]]) -> int:
+    """Grava no arquivo a edicao e o numero escolhidos, uma linha por vez.
+
+    Casa pela chave da linha em vez de guardar o numero da linha porque a
+    mesma carta pode aparecer repetida na lista - todas as ocorrencias da
+    carta escolhida travam na mesma impressao, que e o que cartas_unicas ja
+    tinha juntado numa entrada so.
+
+    O resto do arquivo passa intacto: comentario, cabecalho de secao, linha
+    em branco e linha que ja vinha travada nao sao tocados. Devolve quantas
+    linhas mudaram.
+    """
+    linhas = caminho.read_text(encoding="utf-8").splitlines()
+    trocadas = 0
+
+    for indice, bruta in enumerate(linhas):
+        linha = bruta.strip()
+        if not linha or linha.startswith(("#", "//")):
+            continue
+        casamento = LINHA.match(linha)
+        if casamento is None or casamento.group("set"):
+            continue
+        chave = (casamento.group("nome").strip().lower(), None, None)
+        if chave not in escolhas:
+            continue
+        edicao, numero = escolhas[chave]
+        linhas[indice] = f"{bruta.rstrip()} ({edicao.upper()}) {numero}"
+        trocadas += 1
+
+    if trocadas:
+        caminho.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+    return trocadas

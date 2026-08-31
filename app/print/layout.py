@@ -30,15 +30,15 @@ LINHA_CORTE_COR = "red"
 LINHA_CORTE_ESPESSURA_PX = 6
 
 
-def _mm_para_px(mm: float) -> int:
+def mm_para_px(mm: float) -> int:
     return round(mm * DPI / MM_POR_POLEGADA)
 
 
-A4_LARGURA_PX = _mm_para_px(A4_LARGURA_MM)
-A4_ALTURA_PX = _mm_para_px(A4_ALTURA_MM)
-CARTA_LARGURA_PX = _mm_para_px(CARTA_LARGURA_MM)
-CARTA_ALTURA_PX = _mm_para_px(CARTA_ALTURA_MM)
-ESPACO_ENTRE_CARTAS_PX = _mm_para_px(ESPACO_ENTRE_CARTAS_MM)
+A4_LARGURA_PX = mm_para_px(A4_LARGURA_MM)
+A4_ALTURA_PX = mm_para_px(A4_ALTURA_MM)
+CARTA_LARGURA_PX = mm_para_px(CARTA_LARGURA_MM)
+CARTA_ALTURA_PX = mm_para_px(CARTA_ALTURA_MM)
+ESPACO_ENTRE_CARTAS_PX = mm_para_px(ESPACO_ENTRE_CARTAS_MM)
 
 _GRADE_LARGURA_PX = CARTA_LARGURA_PX * COLUNAS + ESPACO_ENTRE_CARTAS_PX * (COLUNAS - 1)
 _GRADE_ALTURA_PX = CARTA_ALTURA_PX * LINHAS + ESPACO_ENTRE_CARTAS_PX * (LINHAS - 1)
@@ -122,3 +122,15 @@ def montar_folhas_frente(
             _desenhar_linhas_de_corte(ImageDraw.Draw(folha))
         folhas.append(folha)
     return folhas
+
+
+def montar_folha_repetida(celula: Image.Image, *, marca_corte: bool = True) -> Image.Image:
+    """1 folha A4 com a MESMA imagem nas 9 celulas da grade - usada pro verso
+    generico (app.print.verso), onde toda celula sai igual de proposito."""
+    celula = celula.resize((CARTA_LARGURA_PX, CARTA_ALTURA_PX), Image.LANCZOS)
+    folha = _nova_folha()
+    for x, y in _posicoes_grade():
+        folha.paste(celula, (x, y))
+    if marca_corte:
+        _desenhar_linhas_de_corte(ImageDraw.Draw(folha))
+    return folha

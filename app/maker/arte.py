@@ -1,0 +1,208 @@
+"""Escolha da arte que vai pra carta.
+
+O recorte do Scryfall (art_crop, 626x457) e pequeno demais pra uma carta
+gerada em 2010x2814, entao a arte primaria vem do MTGPics.
+
+Tres armadilhas do MTGPics, as tres tratadas aqui:
+
+1. Ele indexa a ilustracao pela edicao onde ela saiu primeiro, nao pela
+   reimpressao. Montar a URL com a edicao/numero do Scryfall so acerta quando
+   a carta e da edicao original; em reimpressao da 404, e o caminho certo sai
+   da pagina da carta.
+2. O numero dele nem sempre bate com o do Scryfall, entao um 200 pode ser a
+   arte de outra carta. Por isso toda candidata e conferida contra o art_crop
+   do Scryfall por assinatura de imagem antes de valer.
+3. Parte do acervo e a arte de divulgacao, com credito do artista, logo do
+   MAGIC ou linha de copyright estampados sobre a ilustracao. Isso sai na
+   carta gerada; quem nao quiser gera com --sem-mtgpics e fica no art_crop.
+
+O art_crop de reserva e o da impressao em INGLES: quando a Wizards nao publicou
+a arte localizada, o da impressao em portugues e uma imagem de aviso
+("Localized Image Not Available") no lugar da arte.
+"""
+
+import base64
+import logging
+import re
+from io import BytesIO
+
+import httpx
+from PIL import Image, UnidentifiedImageError
+
+from app.cards.models import ScryfallCard
+from app.config import SCRYFALL_USER_AGENT
+
+logger = logging.getLogger(__name__)
+
+BASE_MTGPICS = "https://www.mtgpics.com"
+BASE_SCRYFALL = "https://api.scryfall.com"
+
+TIMEOUT = 25.0
+CABECALHOS = {"User-Agent": SCRYFALL_USER_AGENT}
+
+# Miniaturas de arte na pagina da carta - a primeira e a ilustracao desta
+# impressao, as demais sao outras artes do mesmo nome; qual e qual sai da
+# comparacao com o art_crop, nao da ordem.
+_MINIATURA = re.compile(r"pics/art_th/([a-z0-9]+)/([0-9a-z_]+)\.jpg")
+
+# Distancia maxima entre as assinaturas pra considerar que e a mesma
+# ilustracao. Medido no deck de teste: mesma arte fica entre 1 e 20 (o topo e
+# recorte 16:9 de papel de parede), arte de outra carta nao desce de 31.
+DISTANCIA_MAXIMA = 26
+
+
+async def buscar(carta: ScryfallCard) -> str | None:
+    """Data URL com a maior arte disponivel pra esta impressao, ou None."""
+    async with httpx.AsyncClient(
+        timeout=TIMEOUT, follow_redirects=True, headers=CABECALHOS
+    ) as client:
+        referencia = await _art_crop_em_ingles(client, carta)
+        if referencia is None:
+            return None
+
+        arte = await _melhor_do_mtgpics(client, carta, referencia)
+        # O MTGPics costuma ter a arte maior, mas nao sempre - em algumas
+        # edicoes recentes o que ele guarda e menor que o recorte do Scryfall.
+        if arte is None or _pixels(arte) <= _pixels(referencia):
+            arte = referencia
+        return _data_url(arte)
+
+
+async def _melhor_do_mtgpics(
+    client: httpx.AsyncClient, carta: ScryfallCard, referencia: bytes
+) -> bytes | None:
+    """A arte do MTGPics que casa com a ilustracao desta impressao."""
+    assinatura_alvo = _assinatura(referencia)
+    if assinatura_alvo is None:
+        return None
+
+    direta = await _baixar_imagem(client, carta.arte_mtgpics)
+    if direta is not None and _casa(direta, assinatura_alvo):
+        return direta
+
+    candidatas = []
+    for edicao, numero in await _miniaturas_da_pagina(client, carta):
+        imagem = await _baixar_imagem(client, _url_da_arte(f"{edicao}/{numero}"))
+        if imagem is None:
+            continue
+        distancia = _distancia(imagem, assinatura_alvo)
+        if distancia is not None and distancia <= DISTANCIA_MAXIMA:
+            candidatas.append((distancia, _pixels(imagem), imagem))
+
+    if not candidatas:
+        logger.info("%s: sem arte no MTGPics, usando o art_crop", carta.nome_exibido)
+        return None
+    # Menor distancia decide; empate vai pra imagem maior, que costuma ser a
+    # versao em resolucao maior da mesma arte.
+    return min(candidatas, key=lambda item: (item[0], -item[1]))[2]
+
+
+def _url_da_arte(caminho: str) -> str:
+    return f"{BASE_MTGPICS}/pics/art/{caminho}.jpg"
+
+
+async def _miniaturas_da_pagina(
+    client: httpx.AsyncClient, carta: ScryfallCard
+) -> list[tuple[str, str]]:
+    referencia = f"{carta.set}{carta.collector_number.zfill(3)}"
+    try:
+        resposta = await client.get(f"{BASE_MTGPICS}/card", params={"ref": referencia})
+    except httpx.HTTPError:
+        return []
+    if resposta.status_code != 200:
+        return []
+    return list(dict.fromkeys(_MINIATURA.findall(resposta.text)))
+
+
+async def _art_crop_em_ingles(
+    client: httpx.AsyncClient, carta: ScryfallCard
+) -> bytes | None:
+    """O art_crop da impressao em ingles - serve de reserva e de gabarito.
+
+    Carta que ja veio em ingles usa o art_crop que a consulta trouxe; pra
+    impressao em portugues vale uma requisicao a mais, porque o art_crop em
+    portugues pode ser a imagem de aviso em vez da arte.
+    """
+    url = carta.art_crop
+    if carta.lang != "en":
+        try:
+            resposta = await client.get(
+                f"{BASE_SCRYFALL}/cards/{carta.set}/{carta.collector_number}/en"
+            )
+            if resposta.status_code == 200:
+                url = (resposta.json().get("image_uris") or {}).get("art_crop") or url
+        except httpx.HTTPError:
+            pass
+    if not url:
+        return None
+    return await _baixar_imagem(client, url)
+
+
+async def _baixar_imagem(client: httpx.AsyncClient, url: str) -> bytes | None:
+    try:
+        resposta = await client.get(url)
+    except httpx.HTTPError:
+        return None
+    if resposta.status_code != 200:
+        return None
+    if not resposta.headers.get("content-type", "").startswith("image/"):
+        return None
+    return resposta.content
+
+
+def _pixels(imagem: bytes) -> int:
+    try:
+        largura, altura = Image.open(BytesIO(imagem)).size
+    except (UnidentifiedImageError, OSError):
+        return 0
+    return largura * altura
+
+
+def _data_url(imagem: bytes) -> str:
+    return f"data:image/jpeg;base64,{base64.b64encode(imagem).decode()}"
+
+
+def _casa(imagem: bytes, assinatura_alvo: int) -> bool:
+    distancia = _distancia(imagem, assinatura_alvo)
+    return distancia is not None and distancia <= DISTANCIA_MAXIMA
+
+
+def _distancia(imagem: bytes, assinatura_alvo: int) -> int | None:
+    assinatura = _assinatura(imagem)
+    if assinatura is None:
+        return None
+    return (assinatura ^ assinatura_alvo).bit_count()
+
+
+def _assinatura(imagem: bytes) -> int | None:
+    """dHash de 64 bits do quadrado central da imagem.
+
+    O quadrado central existe porque as duas fontes recortam a mesma
+    ilustracao em proporcoes diferentes (o Scryfall em 626x457, o MTGPics as
+    vezes em 16:9 de papel de parede); comparar a area comum e o que mantem a
+    mesma arte perto e arte diferente longe.
+    """
+    try:
+        imagem_aberta = Image.open(BytesIO(imagem)).convert("L")
+    except (UnidentifiedImageError, OSError):
+        return None
+
+    largura, altura = imagem_aberta.size
+    lado = min(largura, altura)
+    quadrado = imagem_aberta.crop(
+        (
+            (largura - lado) // 2,
+            (altura - lado) // 2,
+            (largura + lado) // 2,
+            (altura + lado) // 2,
+        )
+    )
+    pixels = list(quadrado.resize((9, 8), Image.LANCZOS).getdata())
+
+    bits = 0
+    for linha in range(8):
+        for coluna in range(8):
+            esquerda = pixels[linha * 9 + coluna]
+            direita = pixels[linha * 9 + coluna + 1]
+            bits = (bits << 1) | int(esquerda > direita)
+    return bits
