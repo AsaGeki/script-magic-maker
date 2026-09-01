@@ -40,13 +40,15 @@ async def buscar_cartas_do_deck(
 
 
 async def _resolver(entrada: EntradaDeDeck, permitir_ingles: bool) -> ScryfallCard:
-    """Impressao exata quando a linha traz edicao e numero; senao, pelo nome."""
+    """Impressao exata quando a linha traz edicao e numero; senao, pelo nome.
+
+    A impressao pedida pode nao ter PT (ex.: reimpressao em colecao pos-corte
+    de traducao) mesmo quando a carta tem PT em outra edicao. Por isso, antes
+    de aceitar ingles, tenta achar a mesma carta por nome em PT - so cai pro
+    ingles da impressao exata se nem isso existir.
+    """
     if entrada.set and entrada.collector_number:
         carta = await find_card_by_print(entrada.set, entrada.collector_number)
-        if carta is None and permitir_ingles:
-            carta = await find_card_by_print(
-                entrada.set, entrada.collector_number, lang="en"
-            )
         if carta is not None and _e_a_carta_da_linha(entrada.nome, carta):
             return carta
         if carta is not None:
@@ -60,11 +62,22 @@ async def _resolver(entrada: EntradaDeDeck, permitir_ingles: bool) -> ScryfallCa
             )
         else:
             logger.info(
-                '"%s": impressao %s #%s nao encontrada, caindo na busca por nome',
+                '"%s": impressao %s #%s nao encontrada em PT, procurando a carta '
+                "em outra edicao antes de cair pro ingles",
                 entrada.nome,
                 entrada.set.upper(),
                 entrada.collector_number,
             )
+            try:
+                return await find_card_by_name(entrada.nome, permitir_ingles=False)
+            except AppError:
+                pass
+            if permitir_ingles:
+                carta_en = await find_card_by_print(
+                    entrada.set, entrada.collector_number, lang="en"
+                )
+                if carta_en is not None and _e_a_carta_da_linha(entrada.nome, carta_en):
+                    return carta_en
 
     return await find_card_by_name(entrada.nome, permitir_ingles=permitir_ingles)
 
