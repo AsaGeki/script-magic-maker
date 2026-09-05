@@ -1,0 +1,133 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+index 44bfc5b..0c73ac0 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -3598,6 +3598,8 @@ function writeText(textObject, targetContext) {
+ 		//Begin looping through words/codes
+ 		innerloop: for (word of splitText) {
+ 			var wordToWrite = word;
++			/* script-magic-maker: simbolo-de-mana-quebra-linha */
++			var simboloPendente = null;
+ 			if (wordToWrite.includes('{') && wordToWrite.includes('}') || textManaCost || savedFont) {
+ 				var possibleCode = wordToWrite.toLowerCase().replace('{', '').replace('}', '');
+ 				wordToWrite = null;
+@@ -3852,30 +3854,27 @@ function writeText(textObject, targetContext) {
+ 						manaSymbolWidth *= textObject.manaImageScale;
+ 						manaSymbolHeight *= textObject.manaImageScale;
+ 					}
+-					//fake shadow begins
+-					var fakeShadow = lineCanvas.cloneNode();
+-					var fakeShadowContext = fakeShadow.getContext('2d');
+-					fakeShadowContext.clearRect(0, 0, fakeShadow.width, fakeShadow.height);
+-					var backImage = null;
+-					if (manaSymbol.backs) {
+-						backImage = getManaSymbol('back' + Math.floor(Math.random() * manaSymbol.backs) + manaSymbol.back).image;
+-					}
+-					if (textArcRadius > 0) {
+-						if (manaSymbol.backs) {
+-							fakeShadowContext.drawImageArc(backImage, manaSymbolX, manaSymbolY, manaSymbolWidth, manaSymbolHeight, textArcRadius, textArcStart, currentX);
+-						}
+-						fakeShadowContext.drawImageArc(manaSymbol.image, manaSymbolX, manaSymbolY, manaSymbolWidth, manaSymbolHeight, textArcRadius, textArcStart, currentX);
+-					} else if (manaSymbolColor) {
+-						fakeShadowContext.fillImage(manaSymbol.image, manaSymbolX, manaSymbolY, manaSymbolWidth, manaSymbolHeight, manaSymbolColor);
+-					} else {
+-						if (manaSymbol.backs) {
+-							fakeShadowContext.drawImage(backImage, manaSymbolX, manaSymbolY, manaSymbolWidth, manaSymbolHeight);
+-						}
+-						fakeShadowContext.drawImage(manaSymbol.image, manaSymbolX, manaSymbolY, manaSymbolWidth, manaSymbolHeight);
+-					}
+-					lineContext.drawImage(fakeShadow, 0, 0);
+-					//fake shadow ends (thanks, safari)
+-					currentX += manaSymbolWidth + manaSymbolSpacing * 2;
++					/* script-magic-maker: simbolo-de-mana-quebra-linha */
++					// O simbolo era desenhado aqui mesmo, sem conferir se cabia na
++					// largura da caixa - quem quebrava a linha era so o texto que
++					// viesse depois dele. Em "{E}{E}{E}." os simbolos passavam da
++					// caixa e o ponto ia sozinho pra linha seguinte. Guardado, o
++					// simbolo passa pela mesma quebra de linha do texto, logo abaixo,
++					// e so entao e desenhado.
++					// Posicao propria: manaPlacement e manaLayout desenham em ponto
++					// fixo (o custo de mana de moldura com layout), e manaImageScale
++					// ja mexeu no currentX aqui em cima - nesses tres nao ha o que
++					// recalcular nem largura de linha a respeitar.
++					simboloPendente = {
++						simbolo: manaSymbol,
++						largura: manaSymbolWidth,
++						altura: manaSymbolHeight,
++						espacamento: manaSymbolSpacing,
++						x: manaSymbolX,
++						y: manaSymbolY,
++						cor: manaSymbolColor,
++						posicaoPropria: !!(textObject.manaPlacement || textObject.manaLayout || textObject.manaImageScale)
++					};
+ 
+ 					manaSymbolColor = origManaSymbolColor;
+ 				} else {
+@@ -3893,6 +3892,12 @@ function writeText(textObject, targetContext) {
+ 			// mandava o ponto sozinho pra linha seguinte. Pontuacao nao comeca
+ 			// linha; ela cabe na folga da caixa.
+ 			const pontuacaoSolta = /^[.,;:!?)\]»"']+$/.test(wordToWrite || '');
++			/* script-magic-maker: simbolo-de-mana-quebra-linha */
++			if (simboloPendente && !simboloPendente.posicaoPropria && !textOneLine && textArcRadius == 0
++					&& currentX > startingCurrentX
++					&& currentX + simboloPendente.largura + simboloPendente.espacamento * 2 >= textWidth) {
++				newLine = true;
++			}
+ 			//if the word goes past the max line width, go to the next line
+ 			if (wordToWrite && !pontuacaoSolta && lineContext.measureText(wordToWrite).width + currentX >= textWidth && textArcRadius == 0) {
+ 				if (textOneLine && startingTextSize > 1) {
+@@ -3936,6 +3941,37 @@ function writeText(textObject, targetContext) {
+ 				newLineSpacing = (textObject.lineSpacing || 0) * textSize;
+ 				newLine = false;
+ 			}
++			/* script-magic-maker: simbolo-de-mana-quebra-linha */
++			if (simboloPendente) {
++				if (!simboloPendente.posicaoPropria) {
++					simboloPendente.x = currentX + canvasMargin + simboloPendente.espacamento;
++					simboloPendente.y = canvasMargin + textSize * 0.34 - simboloPendente.altura / 2;
++				}
++				//fake shadow begins
++				var fakeShadow = lineCanvas.cloneNode();
++				var fakeShadowContext = fakeShadow.getContext('2d');
++				fakeShadowContext.clearRect(0, 0, fakeShadow.width, fakeShadow.height);
++				var backImage = null;
++				if (simboloPendente.simbolo.backs) {
++					backImage = getManaSymbol('back' + Math.floor(Math.random() * simboloPendente.simbolo.backs) + simboloPendente.simbolo.back).image;
++				}
++				if (textArcRadius > 0) {
++					if (simboloPendente.simbolo.backs) {
++						fakeShadowContext.drawImageArc(backImage, simboloPendente.x, simboloPendente.y, simboloPendente.largura, simboloPendente.altura, textArcRadius, textArcStart, currentX);
++					}
++					fakeShadowContext.drawImageArc(simboloPendente.simbolo.image, simboloPendente.x, simboloPendente.y, simboloPendente.largura, simboloPendente.altura, textArcRadius, textArcStart, currentX);
++				} else if (simboloPendente.cor) {
++					fakeShadowContext.fillImage(simboloPendente.simbolo.image, simboloPendente.x, simboloPendente.y, simboloPendente.largura, simboloPendente.altura, simboloPendente.cor);
++				} else {
++					if (simboloPendente.simbolo.backs) {
++						fakeShadowContext.drawImage(backImage, simboloPendente.x, simboloPendente.y, simboloPendente.largura, simboloPendente.altura);
++					}
++					fakeShadowContext.drawImage(simboloPendente.simbolo.image, simboloPendente.x, simboloPendente.y, simboloPendente.largura, simboloPendente.altura);
++				}
++				lineContext.drawImage(fakeShadow, 0, 0);
++				//fake shadow ends (thanks, safari)
++				currentX += simboloPendente.largura + simboloPendente.espacamento * 2;
++			}
+ 			//if there's a word to write, it's not a space on a new line, and it's allowed to write words, then we write the word
+ 			if (wordToWrite && (currentX != startingCurrentX || wordToWrite != ' ') && !textManaCost) {
+ 				var justifySettings = {
+@@ -3966,7 +4002,15 @@ function writeText(textObject, targetContext) {
+ 					currentX += lineContext.measureText(wordToWrite).width;
+ 				}
+ 			}
+-			if (currentY > textHeight && textBounded && !textOneLine && startingTextSize > 1 && textArcRadius == 0) {
++			/* script-magic-maker: caixa-de-texto-conta-a-centralizacao */
++			// A centralizacao vertical de baixo desloca o bloco pra
++			// (textHeight - currentY + textSize * 0.15) / 2, o que faz o texto
++			// acabar em (currentY + textHeight + textSize * 0.15) / 2. Pra esse
++			// fim caber na caixa, currentY tem que sobrar textSize * 0.15 - sem
++			// isso, o texto que enchia a caixa era dado por cabendo e a ultima
++			// linha saia por baixo da borda.
++			const descidaDaCentralizacao = textObject.noVerticalCenter ? 0 : textSize * 0.15;
++			if (currentY + descidaDaCentralizacao > textHeight && textBounded && !textOneLine && startingTextSize > 1 && textArcRadius == 0) {
+ 				//doesn't fit... try again at a smaller text size?
+ 				startingTextSize -= 1;
+ 				continue outerloop;
