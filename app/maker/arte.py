@@ -9,12 +9,17 @@ Tres armadilhas do MTGPics, as tres tratadas aqui:
    reimpressao. Montar a URL com a edicao/numero do Scryfall so acerta quando
    a carta e da edicao original; em reimpressao da 404, e o caminho certo sai
    da pagina da carta.
-2. O numero dele nem sempre bate com o do Scryfall, entao um 200 pode ser a
-   arte de outra carta. Por isso toda candidata e conferida contra o art_crop
-   do Scryfall por assinatura de imagem antes de valer.
+2. A numeracao dele nem sempre bate com a do Scryfall - XLN 226 e Raging
+   Swordtooth num e Hostage Taker no outro -, entao um 200 pode ser a arte de
+   outra carta. Quem resolve isso e o <title> da pagina, que traz o nome em
+   ingles: so vale a pagina cujo titulo bate com o nome da carta, e quando o
+   ref montado erra, a busca por nome do proprio site diz o ref certo.
 3. Parte do acervo e a arte de divulgacao, com credito do artista, logo do
    MAGIC ou linha de copyright estampados sobre a ilustracao. Isso sai na
    carta gerada; quem nao quiser gera com --sem-mtgpics e fica no art_crop.
+
+Confirmada a pagina, a assinatura de imagem escolhe entre as varias artes que
+um mesmo nome pode ter - ela decide qual ilustracao, nao qual carta.
 
 O art_crop de reserva e o da impressao em INGLES: quando a Wizards nao publicou
 a arte localizada, o da impressao em portugues e uma imagem de aviso
@@ -22,6 +27,7 @@ a arte localizada, o da impressao em portugues e uma imagem de aviso
 """
 
 import base64
+import html
 import logging
 import re
 from io import BytesIO
@@ -31,6 +37,7 @@ from PIL import Image, UnidentifiedImageError
 
 from app.cards.models import ScryfallCard
 from app.config import SCRYFALL_USER_AGENT
+from app.slug import slug
 
 logger = logging.getLogger(__name__)
 
@@ -40,15 +47,20 @@ BASE_SCRYFALL = "https://api.scryfall.com"
 TIMEOUT = 25.0
 CABECALHOS = {"User-Agent": SCRYFALL_USER_AGENT}
 
-# Miniaturas de arte na pagina da carta - a primeira e a ilustracao desta
-# impressao, as demais sao outras artes do mesmo nome; qual e qual sai da
-# comparacao com o art_crop, nao da ordem.
-_MINIATURA = re.compile(r"pics/art_th/([a-z0-9]+)/([0-9a-z_]+)\.jpg")
+# Cada miniatura da pagina vem colada no id da ilustracao que a abre, e e por
+# esse id que se descobre o ilustrador (ver _ilustrador).
+_MINIATURA = re.compile(
+    r"LoadIllus\('(\d+)'\).*?pics/art_th/([a-z0-9]+)/([0-9a-z_]+)\.jpg", re.DOTALL
+)
 
-# Distancia maxima entre as assinaturas pra considerar que e a mesma
-# ilustracao. Medido no deck de teste: mesma arte fica entre 1 e 20 (o topo e
-# recorte 16:9 de papel de parede), arte de outra carta nao desce de 31.
-DISTANCIA_MAXIMA = 26
+# Nome do ilustrador na ficha que o load_illus devolve.
+_ILUSTRADOR = re.compile(r"href=illus\?art=\d+>([^<]+)<")
+
+# O titulo da pagina de carta vem como "Nome em ingles - mtgpics.com".
+_TITULO = re.compile(r"<title>(.*?)\s*-\s*mtgpics\.com</title>", re.IGNORECASE | re.DOTALL)
+
+# Primeiro resultado da busca por nome, no formato card?ref=<edicao><numero>.
+_REF_DO_RESULTADO = re.compile(r"card\?ref=([a-z0-9]+)", re.IGNORECASE)
 
 
 async def buscar(carta: ScryfallCard) -> str | None:
@@ -71,26 +83,42 @@ async def buscar(carta: ScryfallCard) -> str | None:
 async def _melhor_do_mtgpics(
     client: httpx.AsyncClient, carta: ScryfallCard, referencia: bytes
 ) -> bytes | None:
-    """A arte do MTGPics que casa com a ilustracao desta impressao."""
+    """A arte do MTGPics que casa com a ilustracao desta impressao.
+
+    Duas conferencias decidem, as duas exatas: o titulo da pagina diz que e
+    esta carta e o ilustrador da ficha diz que e esta ilustracao. A segunda e
+    o que separa impressao de terreno basico, onde o nome sozinho nao
+    distingue nada. A assinatura de imagem so desempata entre artes do mesmo
+    ilustrador pra mesma carta.
+    """
     assinatura_alvo = _assinatura(referencia)
     if assinatura_alvo is None:
         return None
 
-    direta = await _baixar_imagem(client, carta.arte_mtgpics)
-    if direta is not None and _casa(direta, assinatura_alvo):
-        return direta
+    pagina = await _pagina_da_carta(client, carta)
+    if pagina is None:
+        logger.info(
+            "%s: o MTGPics nao confirmou a carta, usando o art_crop", carta.nome_exibido
+        )
+        return None
 
     candidatas = []
-    for edicao, numero in await _miniaturas_da_pagina(client, carta):
+    for ident, edicao, numero in _miniaturas(pagina):
+        if not await _e_do_ilustrador(client, ident, carta.artist):
+            continue
         imagem = await _baixar_imagem(client, _url_da_arte(f"{edicao}/{numero}"))
         if imagem is None:
             continue
         distancia = _distancia(imagem, assinatura_alvo)
-        if distancia is not None and distancia <= DISTANCIA_MAXIMA:
+        if distancia is not None:
             candidatas.append((distancia, _pixels(imagem), imagem))
 
     if not candidatas:
-        logger.info("%s: sem arte no MTGPics, usando o art_crop", carta.nome_exibido)
+        logger.info(
+            "%s: nenhuma arte do MTGPics e de %s, usando o art_crop",
+            carta.nome_exibido,
+            carta.artist,
+        )
         return None
     # Menor distancia decide; empate vai pra imagem maior, que costuma ser a
     # versao em resolucao maior da mesma arte.
@@ -101,17 +129,100 @@ def _url_da_arte(caminho: str) -> str:
     return f"{BASE_MTGPICS}/pics/art/{caminho}.jpg"
 
 
-async def _miniaturas_da_pagina(
-    client: httpx.AsyncClient, carta: ScryfallCard
-) -> list[tuple[str, str]]:
-    referencia = f"{carta.set}{carta.collector_number.zfill(3)}"
+async def _pagina_da_carta(client: httpx.AsyncClient, carta: ScryfallCard) -> str | None:
+    """O HTML da pagina do MTGPics que e mesmo desta carta, ou None.
+
+    O ref montado com a edicao e o numero do Scryfall acerta na maioria das
+    cartas, mas nao em todas, porque as duas fontes numeram diferente. Quando
+    o titulo da pagina desmente o ref, a busca por nome do site diz o ref
+    certo; se nem ela confirmar, o chamador fica no art_crop.
+    """
+    montado = f"{carta.set}{carta.collector_number.zfill(3)}"
+    pagina = await _pagina_do_ref(client, montado)
+    if pagina is not None and _e_a_carta(pagina, carta):
+        return pagina
+
+    achado = await _ref_por_nome(client, carta.name)
+    if achado is None or achado == montado:
+        return None
+    pagina = await _pagina_do_ref(client, achado)
+    if pagina is not None and _e_a_carta(pagina, carta):
+        logger.info(
+            "%s: %s#%s no MTGPics e outra carta, seguindo pelo ref %s",
+            carta.nome_exibido,
+            carta.set.upper(),
+            carta.collector_number,
+            achado,
+        )
+        return pagina
+    return None
+
+
+async def _pagina_do_ref(client: httpx.AsyncClient, ref: str) -> str | None:
     try:
-        resposta = await client.get(f"{BASE_MTGPICS}/card", params={"ref": referencia})
+        resposta = await client.get(f"{BASE_MTGPICS}/card", params={"ref": ref})
     except httpx.HTTPError:
-        return []
+        return None
+    return resposta.text if resposta.status_code == 200 else None
+
+
+async def _ref_por_nome(client: httpx.AsyncClient, nome: str) -> str | None:
+    """O ref do primeiro resultado da busca por nome do MTGPics."""
+    try:
+        resposta = await client.post(
+            f"{BASE_MTGPICS}/results.php",
+            params={"zbob": 1},
+            data={"cardtitle_search": nome},
+        )
+    except httpx.HTTPError:
+        return None
     if resposta.status_code != 200:
-        return []
-    return list(dict.fromkeys(_MINIATURA.findall(resposta.text)))
+        return None
+    achado = _REF_DO_RESULTADO.search(resposta.text)
+    return achado.group(1).lower() if achado else None
+
+
+def _e_a_carta(pagina: str, carta: ScryfallCard) -> bool:
+    """Se o titulo da pagina nomeia esta carta.
+
+    O titulo vem com entidade HTML - "Chandra&#039;s Spitfire" -, entao passa
+    pelo unescape antes da comparacao; sem isso toda carta com apostrofo no
+    nome era recusada e caia no art_crop.
+
+    A face da frente entra sozinha porque o MTGPics titula carta de duas faces
+    so pela primeira.
+    """
+    achado = _TITULO.search(pagina)
+    if achado is None:
+        return False
+    titulo = slug(html.unescape(achado.group(1)))
+    return titulo in {slug(carta.name), slug(carta.name.split("//")[0])}
+
+
+def _miniaturas(pagina: str) -> list[tuple[str, str, str]]:
+    """(id da ilustracao, edicao, numero) de cada arte listada na pagina."""
+    return list(dict.fromkeys(_MINIATURA.findall(pagina)))
+
+
+async def _e_do_ilustrador(client: httpx.AsyncClient, ident: str, artista: str | None) -> bool:
+    """Se a ilustracao e de quem o Scryfall credita nesta impressao.
+
+    Carta de varios artistas vem creditada junta no Scryfall ("A & B") e
+    separada no MTGPics, por isso basta um nome cair dentro do outro.
+    """
+    if not artista:
+        return False
+    try:
+        resposta = await client.get(f"{BASE_MTGPICS}/load_illus", params={"i": ident})
+    except httpx.HTTPError:
+        return False
+    if resposta.status_code != 200:
+        return False
+    achado = _ILUSTRADOR.search(resposta.text)
+    if achado is None:
+        return False
+    do_site, do_scryfall = slug(achado.group(1)), slug(artista)
+    return do_site in do_scryfall or do_scryfall in do_site
 
 
 async def _art_crop_em_ingles(
@@ -160,11 +271,6 @@ def _pixels(imagem: bytes) -> int:
 
 def _data_url(imagem: bytes) -> str:
     return f"data:image/jpeg;base64,{base64.b64encode(imagem).decode()}"
-
-
-def _casa(imagem: bytes, assinatura_alvo: int) -> bool:
-    distancia = _distancia(imagem, assinatura_alvo)
-    return distancia is not None and distancia <= DISTANCIA_MAXIMA
 
 
 def _distancia(imagem: bytes, assinatura_alvo: int) -> int | None:
