@@ -52,6 +52,7 @@ MOLDURAS = {
     "Full art (fiel)": "FullArtNew",
     "Circuit": "Circuit",
     "Terreno basico de arte cheia": "TextlessBasics2022",
+    "Terreno basico sem borda": "TextlessBasicsBorderless",
 }
 MOLDURA_PADRAO = "M15Regular-1"
 
@@ -72,6 +73,10 @@ def moldura_sugerida(carta: ScryfallCard) -> str:
     # carta comum chega nisso, nem a "Full art (fiel)", que ainda desenha a
     # moldura de pedra em volta.
     if e_terreno_basico(carta) and carta.full_art:
+        # A impressao sem borda vai mais longe: a arte cobre a carta inteira e
+        # o nome fica na faixa de baixo, no lugar da linha de tipo.
+        if carta.border_color == "borderless":
+            return MOLDURAS["Terreno basico sem borda"]
         return MOLDURAS["Terreno basico de arte cheia"]
     if "etched" in efeitos:
         return MOLDURAS["Etched"]
@@ -199,7 +204,10 @@ def _marca_dagua(carta: ScryfallCard, moldura: str) -> tuple[str, str] | None:
     manter. Wastes fica de fora: o gerador nao tem svg de incolor. A moldura de
     arte cheia tambem: o simbolo de mana ja e camada dela.
     """
-    if moldura == MOLDURAS["Terreno basico de arte cheia"]:
+    if moldura in (
+        MOLDURAS["Terreno basico de arte cheia"],
+        MOLDURAS["Terreno basico sem borda"],
+    ):
         return None
     if not e_terreno_basico(carta):
         return None
@@ -441,12 +449,19 @@ async def _aplicar_selo(page: Page, carta: ScryfallCard) -> None:
 _APLICAR_NOME_TRADUZIDO = carregar("aplicar-nome-traduzido")
 
 
-async def _aplicar_nome_traduzido(page: Page, carta: ScryfallCard) -> None:
-    """Poe no titulo o nome traduzido montado fora do Scryfall (hoje, o do
-    terreno basico sem impressao em portugues)."""
-    if carta.lang != "en" or not carta.printed_name:
+async def _aplicar_nome_traduzido(
+    page: Page, carta: ScryfallCard, *, preferir_arena: bool
+) -> None:
+    """Poe no titulo o nome traduzido montado fora do Scryfall - o do terreno
+    basico sem impressao em portugues e o do MTG Arena, pra carta que saiu
+    depois do corte de traducao."""
+    if carta.lang != "en":
         return
-    await page.evaluate(_APLICAR_NOME_TRADUZIDO, carta.printed_name)
+    do_arena = carta.arena.nome if preferir_arena and carta.arena else None
+    nome = do_arena or carta.printed_name
+    if not nome:
+        return
+    await page.evaluate(_APLICAR_NOME_TRADUZIDO, nome)
 
 
 async def _aplicar_moldura(page: Page, carta: ScryfallCard) -> None:
@@ -587,7 +602,6 @@ async def _preencher(
                 "textoTraduzido": _texto_traduzido(carta),
                 "palavrasDeHabilidade": list(palavras_de_habilidade()),
                 "arenaId": carta.id if usar_arena else None,
-                "arenaNome": carta.arena.nome if usar_arena else None,
                 "arenaTexto": carta.arena.texto if usar_arena else None,
                 "arenaFlavor": carta.arena.flavor_text if usar_arena else None,
             },
@@ -610,7 +624,7 @@ async def _preencher(
         await _aplicar_moldura(page, carta)
         await _aplicar_selo(page, carta)
         await _aplicar_marca_dagua(page, carta, moldura)
-        await _aplicar_nome_traduzido(page, carta)
+        await _aplicar_nome_traduzido(page, carta, preferir_arena=usar_arena)
         await _redesenhar_texto_final(page)
         if arte_mtgpics:
             await _aplicar_arte(page, carta)
