@@ -1,0 +1,78 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+index 467fb45..44bfc5b 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -879,6 +879,10 @@ function autoFrame() {
+ 	} else if (frame == 'Borderless') {
+ 		group = 'Showcase-5';
+ 		autoBorderlessFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt.text);
++	/* script-magic-maker: moldura-de-terreno-de-arte-cheia */
++	} else if (frame == 'TextlessBasics2022') {
++		group = 'Textless-4';
++		autoTextlessBasics2022Frame(colors, card.text.mana.text, card.text.type.text, '');
+ 	}
+ 
+ 	if (autoFramePack != frame) {
+@@ -1285,6 +1289,49 @@ async function autoBorderlessFrame(colors, mana_cost, type_line, power) {
+ 	await card.frames.forEach(item => addFrame([], item));
+ 	card.frames.reverse();
+ }
++/* script-magic-maker: moldura-de-terreno-de-arte-cheia */
++// O terreno basico de arte cheia nao tem janela de arte nem caixa de regras: a
++// moldura e so a borda arredondada da cor, mais o simbolo de mana grande no
++// canto inferior esquerdo. As duas camadas e a geometria vem do pacote
++// TextlessBasics2022, carregado logo em seguida pelo autoFrame().
++async function autoTextlessBasics2022Frame(colors, mana_cost, type_line, power) {
++	//clear the draggable frames
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	var letter = 'C';
++	if (colors.length == 1) {
++		letter = colors[0].toUpperCase();
++	} else if (colors.length > 1) {
++		letter = 'M';
++	}
++
++	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'C': 'Colorless'};
++	var frameFiles = {'W': 'w', 'U': 'u', 'B': 'b', 'R': 'r', 'G': 'g', 'M': 'm', 'C': 'l'};
++	// So as cinco cores tem versao nevada; o resto cai na normal.
++	var snow = type_line.toLowerCase().includes('snow') && 'WUBRG'.includes(letter);
++	// O multicolorido nao tem simbolo proprio no pacote.
++	var symbolFile = letter == 'M' ? 'c' : frameFiles[letter];
++
++	var frames = [
++		{
++			'name': frameNames[letter] + ' Mana Symbol',
++			'src': '/img/frames/textless/2022/s' + symbolFile + '.png',
++			'masks': [],
++			'bounds': {x: 62/1500, y: 1752/2100, width: 168/1500, height: 168/2100}
++		},
++		{
++			'name': frameNames[letter] + (snow ? ' Snow' : '') + ' Frame',
++			'src': '/img/frames/textless/2022/' + (snow ? 'snow/' : '') + frameFiles[letter] + '.png',
++			'masks': []
++		}
++	];
++
++	card.frames = frames;
++	card.frames.reverse();
++	await card.frames.forEach(item => addFrame([], item));
++	card.frames.reverse();
++}
+ async function auto8thEditionFrame(colors, mana_cost, type_line, power, colorshifted = false) {
+ 	var frames = card.frames.filter(frame => frame.name.includes('Extension'));
+ 
+diff --git a/creator/index.html b/creator/index.html
+index f3d1c15..7b432d7 100644
+--- a/creator/index.html
++++ b/creator/index.html
+@@ -722,6 +722,8 @@
+ 							<option disabled>Redone frames</option>
+ 							<option value="M15RegularNew">Regular (Accurate)</option>
+ 							<option value="FullArtNew">Full art (Accurate)</option>
++							<!-- script-magic-maker: moldura-de-terreno-de-arte-cheia -->
++							<option value="TextlessBasics2022">Fullart Basic Land (2022)</option>
+ 							<option value="UBNew">Universes Beyond (Accurate)</option>
+ 
+ 							<option disabled>Custom frames</option>

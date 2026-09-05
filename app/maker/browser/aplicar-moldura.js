@@ -11,12 +11,25 @@
 // card.text[...].text direto (em vez de passar pela caixa de texto da
 // interface) nao dispara textEdited(), que agendaria um autoFrame() novo, com
 // o portugues de volta, 500ms depois.
+//
+// A moldura de terreno de arte cheia nao tem caixa de regras, entao card.text
+// chega aqui sem o campo `rules` - que e justamente de onde o autoFrame tira a
+// cor do terreno. Criar o campo so pela duracao da chamada cobre isso.
 (args) => {
-    const tipoPt = card.text.type.text;
-    const regrasPt = card.text.rules.text;
-    card.text.type.text = args.tipoIngles;
-    card.text.rules.text = args.regrasIngles;
+    const emprestar = (campo, valorIngles) => {
+        const original = card.text[campo];
+        if (original) {
+            const anterior = original.text;
+            original.text = valorIngles;
+            return () => { original.text = anterior; };
+        }
+        card.text[campo] = {text: valorIngles};
+        return () => { delete card.text[campo]; };
+    };
+
+    const devolverTipo = emprestar('type', args.tipoIngles);
+    const devolverRegras = emprestar('rules', args.regrasIngles);
     autoFrame();
-    card.text.type.text = tipoPt;
-    card.text.rules.text = regrasPt;
+    devolverRegras();
+    devolverTipo();
 }

@@ -51,6 +51,7 @@ MOLDURAS = {
     "Seventh Edition": "Seventh",
     "Full art (fiel)": "FullArtNew",
     "Circuit": "Circuit",
+    "Terreno basico de arte cheia": "TextlessBasics2022",
 }
 MOLDURA_PADRAO = "M15Regular-1"
 
@@ -65,6 +66,13 @@ def moldura_sugerida(carta: ScryfallCard) -> str:
     outra ainda pode trocar depois.
     """
     efeitos = carta.frame_effects or []
+    # Terreno basico de arte cheia vem antes das outras: a carta de papel nao
+    # tem janela de arte, caixa de regras nem linha de credito na moldura, so a
+    # borda da cor e o simbolo de mana no canto - e nenhuma das molduras de
+    # carta comum chega nisso, nem a "Full art (fiel)", que ainda desenha a
+    # moldura de pedra em volta.
+    if e_terreno_basico(carta) and carta.full_art:
+        return MOLDURAS["Terreno basico de arte cheia"]
     if "etched" in efeitos:
         return MOLDURAS["Etched"]
     # Borderless antes de full art: carta de arte cheia E sem borda (o terreno
@@ -178,13 +186,16 @@ TEMPO_LIMITE_DESENHO = 45.0
 TEMPO_LIMITE_ELEMENTO = 30_000  # milissegundos, como o Playwright espera
 
 
-def _marca_dagua(carta: ScryfallCard) -> tuple[str, str] | None:
+def _marca_dagua(carta: ScryfallCard, moldura: str) -> tuple[str, str] | None:
     """Imagem e cor da marca d'agua desta carta, ou None pra deixar sem.
 
     So terreno basico usa por enquanto, e a cor sai do proprio simbolo de mana
     do oracle_text ("({T}: Add {R}.)") - assim nao ha tabela de subtipo pra
-    manter. Wastes fica de fora: o gerador nao tem svg de incolor.
+    manter. Wastes fica de fora: o gerador nao tem svg de incolor. A moldura de
+    arte cheia tambem: o simbolo de mana ja e camada dela.
     """
+    if moldura == MOLDURAS["Terreno basico de arte cheia"]:
+        return None
     if not e_terreno_basico(carta):
         return None
     simbolo = re.search(r"\{([WUBRG])\}", carta.oracle_text or "")
@@ -375,10 +386,10 @@ async def _aplicar_arte(page: Page, carta: ScryfallCard) -> bool:
     return True
 
 
-async def _aplicar_marca_dagua(page: Page, carta: ScryfallCard) -> None:
+async def _aplicar_marca_dagua(page: Page, carta: ScryfallCard, moldura: str) -> None:
     """Precisa rodar depois da moldura: os limites onde a marca d'agua e
     encaixada (card.watermarkBounds) vem do pacote de molduras."""
-    marca = _marca_dagua(carta)
+    marca = _marca_dagua(carta, moldura)
     if marca is None:
         return
     imagem, cor = marca
@@ -580,7 +591,7 @@ async def _preencher(
         if await _selecionar_impressao(page, carta):
             await _esperar_desenho(page)
         await _aplicar_moldura(page, carta)
-        await _aplicar_marca_dagua(page, carta)
+        await _aplicar_marca_dagua(page, carta, moldura)
         await _aplicar_nome_traduzido(page, carta)
         await _redesenhar_texto_final(page)
         if arte_mtgpics:
