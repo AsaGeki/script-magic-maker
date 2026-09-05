@@ -14,7 +14,7 @@
 // proprio site aplicar curlyQuotes, itailico de reminder text e formatacao de
 // flavor uma vez so - a mesma coisa que ele faz pra carta com pt de verdade.
 (args) => {
-    const { nome, idAlvo, tipoDeReserva, textoDeReserva, tipoTraduzido, textoTraduzido, arenaId, arenaNome, arenaTexto, arenaFlavor, palavrasDeHabilidade } = args;
+    const { nome, idAlvo, tipoDeReserva, textoDeReserva, tipoTraduzido, textoTraduzido, arenaId, arenaTexto, arenaFlavor, palavrasDeHabilidade } = args;
     // Lista oficial do MTGJSON (ver app.cards.palavras_chave): e ela que diz
     // quais palavras antes do travessao saem em italico. O changeCardIndex
     // le daqui; sem ela ele cai na lista embutida do proprio gerador.
@@ -36,8 +36,11 @@
                 if (tipoTraduzido) c.type_line = tipoTraduzido;
                 if (textoTraduzido !== null) c.oracle_text = textoTraduzido;
             }
+            // O nome nao entra aqui: importCard() usa c.name pra buscar a arte
+            // no Scryfall, e com o nome traduzido a busca volta vazia - a carta
+            // saia sem o credito do ilustrador. Ele e aplicado depois, junto com
+            // os outros nomes montados por fora (ver _aplicar_nome_traduzido).
             if (arenaId && c.id === arenaId) {
-                c.name = arenaNome;
                 if (arenaTexto) c.oracle_text = arenaTexto;
                 if (arenaFlavor) c.flavor_text = arenaFlavor;
             }
