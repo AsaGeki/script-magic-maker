@@ -26,7 +26,7 @@ import httpx
 
 from app.cards.arena import TraducaoArena
 from app.cards.models import ScryfallCard
-from app.cards.service import find_card_by_id
+from app.cards.service import _buscar, find_card_by_id
 from app.config import SCRYFALL_USER_AGENT
 
 logger = logging.getLogger(__name__)
@@ -121,7 +121,11 @@ async def _montar_ficha(
     ficha.printed_type_line = await _linha_de_tipo_em_portugues(client, ficha, criadora)
 
     nome = ficha.arena.nome if ficha.arena else None
-    regra = _regra_em_portugues(criadora, ficha)
+    regra = (
+        _regra_em_portugues(criadora, ficha)
+        or await _regra_de_outra_criadora(client, ficha)
+        or await _linha_solta_em_portugues(client, ficha)
+    )
     if nome or regra:
         # Reaproveita o caminho que o gerador ja usa pra texto nao impresso
         # (ver preferir_arena em app.maker.service) em vez de abrir outro.
@@ -152,7 +156,9 @@ async def _linha_de_tipo_em_portugues(
     tipos_en = re.sub(r"^\s*Token\b", "", tipos_en).strip()
     subtipos_en = subtipos_en.strip()
     if not tipos_en:
-        return None
+        # Ficha generica ("Copy", "Poison") traz a linha de tipo so com
+        # "Token": nao sobra tipo pra traduzir, e a linha inteira e a marca.
+        return None if subtipos_en else MARCA_DE_FICHA.capitalize()
 
     tipos_pt = await _metade_traduzida(client, tipos_en, subtipo=False)
     if tipos_pt is None:
@@ -236,6 +242,98 @@ def _regra_em_portugues(criadora: ScryfallCard, ficha: ScryfallCard) -> str | No
     if not conferencia or not alvo or conferencia.lower() != alvo.lower():
         return None
     return _ability_entre_aspas(criadora.printed_text)
+
+
+# Quantas cartas consultar procurando o lembrete traduzido antes de desistir.
+CANDIDATAS_DE_LEMBRETE = 8
+
+# A linha solta exige varrer mais cartas: a palavra-chave costuma vir
+# junto de outras na mesma linha, e so serve quem a tem sozinha.
+CANDIDATAS_DE_LINHA_SOLTA = 30
+
+
+async def _regra_de_outra_criadora(
+    client: httpx.AsyncClient, ficha: ScryfallCard
+) -> str | None:
+    """O lembrete da ficha tirado de outra carta que cria a mesma ficha.
+
+    A carta-mae do deck nem sempre descreve a ficha: o Oko em portugues traz so
+    "Crie uma ficha de Comida.", sem o lembrete que o ingles tem. Outras cartas
+    que criam a mesma ficha trazem - e a conferencia continua a mesma, a
+    extracao no ingles tem que bater com o oracle_text da ficha, entao nenhuma
+    candidata entra sem prova.
+    """
+    alvo = _sem_ponto_final(ficha.oracle_text)
+    if not alvo:
+        return None
+    try:
+        candidatas = await _buscar(client, f'oracle:"{ficha.name} token"', "pt", unique="cards")
+    except Exception as erro:  # noqa: BLE001 - lembrete e extra, nunca derruba o deck
+        logger.info('Ficha "%s": busca de lembrete falhou (%s)', ficha.name, erro)
+        return None
+
+    for candidata in candidatas[:CANDIDATAS_DE_LEMBRETE]:
+        conferencia = _ability_entre_aspas(candidata.oracle_text)
+        if not conferencia or conferencia.lower() != alvo.lower():
+            continue
+        em_portugues = _ability_entre_aspas(candidata.printed_text)
+        if em_portugues:
+            return em_portugues
+    return None
+
+
+async def _linha_solta_em_portugues(
+    client: httpx.AsyncClient, ficha: ScryfallCard
+) -> str | None:
+    """Ficha cujo texto e uma linha so, sem lembrete que descreva ela.
+
+    E o caso da palavra-chave sozinha ("Flying"): nao ha carta que a coloque
+    entre aspas, entao a extracao por lembrete nao acha nada. Aqui a prova e
+    outra, a mesma da isencao de italico: numa carta em portugues, a linha
+    equivalente e a que ocupa a MESMA posicao no texto em ingles.
+    """
+    alvo = (ficha.oracle_text or "").strip()
+    if not alvo or len(alvo.splitlines()) != 1:
+        return None
+    # A busca vai so com o que vem antes do lembrete: a frase inteira entre
+    # parenteses e comprida demais e o Scryfall nao acha nada com ela.
+    procurado = alvo.split("(")[0].strip().rstrip(".").strip()
+    try:
+        candidatas = await _buscar(client, f'oracle:"{procurado}"', "pt", unique="cards")
+    except Exception as erro:  # noqa: BLE001 - texto da ficha e extra
+        logger.info('Ficha "%s": busca de linha solta falhou (%s)', ficha.name, erro)
+        return None
+
+    reserva = None
+    for candidata in candidatas[:CANDIDATAS_DE_LINHA_SOLTA]:
+        em_ingles = (candidata.oracle_text or "").splitlines()
+        em_portugues = (candidata.printed_text or "").splitlines()
+        if len(em_ingles) != len(em_portugues):
+            continue
+        for indice, linha in enumerate(em_ingles):
+            traduzida = em_portugues[indice].strip()
+            if not traduzida or not _mesma_linha(linha, alvo):
+                continue
+            # A ficha que traz lembrete merece uma linha que tambem traga; a
+            # sem lembrete fica guardada caso nao apareca nenhuma completa.
+            if "(" in alvo and "(" not in traduzida:
+                reserva = reserva or traduzida
+                continue
+            return traduzida
+    return reserva
+
+
+def _mesma_linha(em_ingles: str, alvo: str) -> bool:
+    """Duas linhas dizem a mesma coisa.
+
+    O lembrete entre parenteses e comparado a parte porque a mesma
+    palavra-chave sai com redacao um pouco diferente entre a ficha e a carta;
+    o que precisa bater exato e o que vem antes dele.
+    """
+    def sem_lembrete(texto: str) -> str:
+        return texto.split("(")[0].strip().rstrip(".").strip().lower()
+
+    return sem_lembrete(em_ingles) == sem_lembrete(alvo) and bool(sem_lembrete(alvo))
 
 
 def _ability_entre_aspas(texto: str | None) -> str | None:
