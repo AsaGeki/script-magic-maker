@@ -62,17 +62,25 @@ def fill(
 
 @app.command()
 def setup():
-    """Baixa o fork do Card Conjurer para vendor/."""
+    """Baixa o fork do Card Conjurer para vendor/ e aplica os patches."""
     from app.vendor import clonar, esta_instalado, tamanho_em_disco
+    from app.vendor import patches
 
     if esta_instalado(CARDCONJURER_DIR):
         gb = tamanho_em_disco(CARDCONJURER_DIR) / 1024**3
         console.print(f"[bold green]OK[/bold green] ja instalado em [bold]{CARDCONJURER_DIR}[/bold] ({gb:.1f} GB)")
-        return
-    console.print(f"Clonando o Card Conjurer em {CARDCONJURER_DIR} - cerca de 5 GB.")
-    clonar(CARDCONJURER_DIR)
-    gb = tamanho_em_disco(CARDCONJURER_DIR) / 1024**3
-    console.print(f"[bold green]OK[/bold green] {gb:.1f} GB em disco")
+    else:
+        console.print(f"Clonando o Card Conjurer em {CARDCONJURER_DIR} - cerca de 5 GB.")
+        clonar(CARDCONJURER_DIR)
+        gb = tamanho_em_disco(CARDCONJURER_DIR) / 1024**3
+        console.print(f"[bold green]OK[/bold green] {gb:.1f} GB em disco")
+
+    aplicados = patches.aplicar(CARDCONJURER_DIR)
+    if aplicados:
+        for patch in aplicados:
+            console.print(f"[bold green]OK[/bold green] patch aplicado: {patch.name}")
+    else:
+        console.print("[dim]Patches do Card Conjurer ja estavam aplicados.[/dim]")
 
 
 @app.command()

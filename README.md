@@ -53,6 +53,10 @@ controle de versão — são 2,7 GB de molduras):
 uv run cli.py setup
 ```
 
+O mesmo comando aplica no clone os patches de `patches/cardconjurer/` — são as
+correções nossas ao gerador, que precisam ser reaplicadas porque `vendor/` não
+é versionado. Sem elas o gerador se recusa a subir.
+
 Depois é só rodar:
 
 ```bash
@@ -76,13 +80,19 @@ Os demais comandos:
 
 | Comando | O que faz |
 |---|---|
-| `cli.py setup` | Clona o Card Conjurer em `vendor/` |
+| `cli.py setup` | Clona o Card Conjurer em `vendor/` e aplica os patches |
 | `cli.py serve` | Sobe a API de consulta dos dados |
 
 Formato esperado da lista de deck (`.txt`/`.dec`): ver [DECK.md](DECK.md).
 
 As imagens caem em `output/cards/` (carta avulsa) e `output/decks/<deck>/`
 (lista importada); o PDF fica na raiz de `output/`.
+
+Cada pasta de deck ganha um `metadata.txt` com as cópias de cada carta, em quais
+modalidades o deck pode entrar (Standard, Pioneer, Modern, Legacy, Vintage,
+Pauper e Commander) e quais cartas travam cada uma. A legalidade por carta vem
+do Scryfall; o tamanho do deck, o limite de cópias e o singleton do Commander
+são conferidos aqui. Essa mesma leitura vira a última página do PDF do deck.
 
 Nenhuma variável em `.env` é obrigatória — `PORT`, `OUTPUT_DIR`, `HEADLESS`,
 `CARDCONJURER_DIR`, `CARDCONJURER_PORT` e `SCRYFALL_USER_AGENT` já têm default.

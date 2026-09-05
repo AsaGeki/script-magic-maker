@@ -1,0 +1,157 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+index b2119dc..4120a83 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -65,6 +65,17 @@ setSymbol.onerror = function() {
+ 	if (this.src.includes('gatherer.wizards.com')) {
+ 		notify('<a target="_blank" href="http' + this.src.split('http')[2] + '">Loading the set symbol from Gatherer failed. Please check this link to see if it exists. If it does, it may be necessary to manually download and upload the image.</a>', 5);
+ 	}
++	/* script-magic-maker: simbolo-de-edicao-do-scryfall */
++	// A biblioteca local de simbolos para na data do clone: colecao lancada
++	// depois nao tem svg e a carta saia sem simbolo nenhum. O Scryfall publica
++	// o svg de toda colecao - ele vem sem a cor da raridade, mas e melhor que
++	// simbolo faltando.
++	const campoDaColecao = document.querySelector('#set-symbol-code');
++	const codigoDaColecao = campoDaColecao ? (campoDaColecao.value || '').toLowerCase() : '';
++	if (codigoDaColecao && this.src.includes('/img/setSymbols/official/')) {
++		this.src = 'https://svgs.scryfall.io/sets/' + codigoDaColecao + '.svg';
++		return;
++	}
+ 	if (!this.src.includes('/img/blank.png')) {this.src = fixUri('/img/blank.png');}
+ }
+ setSymbol.onload = setSymbolEdited;
+@@ -3683,10 +3694,16 @@ function writeText(textObject, targetContext) {
+ 					if (document.querySelector('#' + word.replace('{elemid', '').replace('}', ''))) {
+ 						wordToWrite = document.querySelector('#' + word.replace('{elemid', '').replace('}', '')).value || '';
+ 					}
+-					if (word.includes('set')) {
++					/* script-magic-maker: numero-so-justifica-com-midleft */
++					// justifyWidth so e calculado no ramo do 'set', que le
++					// card.bottomInfo.midLeft. Moldura sem esse campo (as antigas)
++					// caia no ramo do 'number' com o justifyWidth global de outra
++					// carta - o numero saia espremido em 90px, invisivel. Sem
++					// midLeft nao ha largura pra justificar: desenha normal.
++					if (word.includes('set') && card.bottomInfo.midLeft) {
+ 						var bottomTextSubstring = card.bottomInfo.midLeft.text.substring(0, card.bottomInfo.midLeft.text.indexOf('  {savex}')).replace('{elemidinfo-set}', document.querySelector('#info-set').value || '').replace('{elemidinfo-language}', document.querySelector('#info-language').value || '');
+ 						justifyWidth = lineContext.measureText(bottomTextSubstring).width;
+-					} else if (word.includes('number') && wordToWrite.includes('/') && card.version != 'pokemon') {
++					} else if (word.includes('number') && wordToWrite.includes('/') && card.version != 'pokemon' && card.bottomInfo.midLeft) {
+ 						fillJustify = true;
+ 						wordToWrite = Array.from(wordToWrite).join(' ');
+ 					}
+@@ -3823,8 +3840,14 @@ function writeText(textObject, targetContext) {
+ 				wordToWrite = wordToWrite.replace(/f(?:\s|$)/g, '\ue006').replace(/h(?:\s|$)/g, '\ue007').replace(/m(?:\s|$)/g, '\ue008').replace(/n(?:\s|$)/g, '\ue009').replace(/k(?:\s|$)/g, '\ue00a');
+ 			}
+ 
++			/* script-magic-maker: sem-pontuacao-orfa */
++			// Simbolo de mana nao confere a largura antes de desenhar: quem quebra
++			// a linha e o texto que vem depois dele. Em "{E}{E}{E}. Quando" isso
++			// mandava o ponto sozinho pra linha seguinte. Pontuacao nao comeca
++			// linha; ela cabe na folga da caixa.
++			const pontuacaoSolta = /^[.,;:!?)\]»"']+$/.test(wordToWrite || '');
+ 			//if the word goes past the max line width, go to the next line
+-			if (wordToWrite && lineContext.measureText(wordToWrite).width + currentX >= textWidth && textArcRadius == 0) {
++			if (wordToWrite && !pontuacaoSolta && lineContext.measureText(wordToWrite).width + currentX >= textWidth && textArcRadius == 0) {
+ 				if (textOneLine && startingTextSize > 1) {
+ 					//doesn't fit... try again at a smaller text size?
+ 					startingTextSize -= 1;
+@@ -4449,14 +4472,39 @@ async function bottomInfoEdited() {
+ 	card.infoNote = document.querySelector('#info-note').value;
+ 
+ 	if (document.querySelector('#enableCollectorInfo').checked) {
++		/* script-magic-maker: rodape-preserva-numero */
++		// O campo que carrega o copyright carrega tambem o numero de
++		// colecionador nas molduras antigas - os dois dividem a mesma linha.
++		// Descartar o campo inteiro por causa do copyright levava o numero
++		// junto e a carta saia sem numero nenhum; aqui saem so os trechos
++		// indesejados e o que sobra continua sendo desenhado.
++		// A linha do copyright aparece em varios formatos - com e sem "1993-",
++		// com e sem ", Inc.", e a da Legend Story Studios troca o titular. A
++		// alternativa longa vem primeiro pra levar a expressao inteira junto com
++		// o ano; sem ela sobrava "1993-2026" solto na carta.
++		const trechosIndesejados = /(?:™\s*&\s*)?©\s*(?:\d{4}\s*[-–—]\s*)?\{elemidinfo-year\}\s*(?:Wizards of the Coast(?:,\s*Inc\.?)?|Legend Story Studios)|NOT FOR SALE|(?:Wizards of the Coast(?:,\s*Inc\.?)?|Legend Story Studios)|cardconjurer\.com/gi;
++		// Campo que sempre foi descartado nunca teve a posicao conferida: nas
++		// molduras antigas a linha do copyright cai em cima da linha do
++		// ilustrador. So esses descem quando colidem; os que o gerador ja
++		// desenhava ficam onde estao, inclusive os que dividem uma linha de
++		// proposito e se separam por savex/loadx.
++		const caixasDesenhadas = [];
+ 		for (var textObject of Object.entries(card.bottomInfo)) {
+-			if (["NOT FOR SALE", "Wizards of the Coast", "CardConjurer.com", "cardconjurer.com"].some(v => textObject[1].text.includes(v))) {
++			const textoOriginal = textObject[1].text || '';
++			const textoLimpo = textoOriginal.replace(trechosIndesejados, '').replace(/\s{2,}/g, ' ').trim();
++			if (!textoLimpo) {
+ 				continue;
+-			} else {
+-				textObject[1].name = textObject[0];
+-				await writeText(textObject[1], bottomInfoContext);
+ 			}
+-			continue;
++			const campo = {...textObject[1], name: textObject[0], text: textoLimpo};
++			const altura = campo.height || 0;
++			if (textoLimpo !== textoOriginal) {
++				const colididas = caixasDesenhadas.filter(c => campo.y < c.fim && c.inicio < campo.y + altura);
++				if (colididas.length) {
++					campo.y = Math.max(...colididas.map(c => c.fim));
++				}
++			}
++			caixasDesenhadas.push({inicio: campo.y, fim: campo.y + altura});
++			await writeText(campo, bottomInfoContext);
+ 		}
+ 	}
+ 
+@@ -4799,10 +4847,29 @@ function changeCardIndex() {
+ 	if (card.text.type) {card.text.type.text = langFontCode + cardToImport.type_line || '';}
+ 
+ 	var italicExemptions = ['Boast', 'Cycling', 'Visit', 'Prize', 'I', 'II', 'III', 'IV', 'I, II', 'II, III', 'III, IV', 'I, II, III', 'II, III, IV', 'I, II, III, IV', '• Khans', '• Dragons', '• Mirran', '• Phyrexian', 'Prototype', 'Companion', 'To solve', 'Solved'];
+-	var rulesText = (cardToImport.oracle_text || '').replace(/(?:\((?:.*?)\)|[^"\n]+(?= — ))/g, function(a){
+-	    if (italicExemptions.includes(a) || (cardToImport.keywords && cardToImport.keywords.indexOf('Spree') != -1 && a.startsWith('+'))) {return a;}
+-	    return '{i}' + a + '{/i}';
+-	});
++	/* script-magic-maker: isencao-de-italico-traduzida */
++	// A lista de isencoes so tem os nomes em ingles, entao em outro idioma a
++	// palavra-chave com travessao ("Vangloria", por Boast) saia italica como
++	// se fosse palavra de habilidade. A linha equivalente em ingles resolve:
++	// mesma posicao, mesmo papel - so o nome mudou na traducao.
++	const linhasEmIngles = (cardToImport.textoEmIngles || '').split('\n');
++	var rulesText = (cardToImport.oracle_text || '').split('\n').map(function(linha, indice){
++	    return linha.replace(/(?:\((?:.*?)\)|[^"\n]+(?= — ))/g, function(a){
++	        if (italicExemptions.includes(a) || (cardToImport.keywords && cardToImport.keywords.indexOf('Spree') != -1 && a.startsWith('+'))) {return a;}
++	        const equivalenteEmIngles = (linhasEmIngles[indice] || '').split(' — ')[0];
++	        if (!a.startsWith('(') && italicExemptions.includes(equivalenteEmIngles)) {return a;}
++	        // A lista de isencoes daqui e curta e so cobre o que alguem lembrou.
++	        // Quando o chamador manda as palavras de habilidade do MTGJSON, ela
++	        // e a autoridade: so entra em italico quem esta la. Palavra-chave
++	        // com travessao (Evoke, Boast, Cycling) fica redonda, como na carta.
++	        const palavrasDeHabilidade = window.palavrasDeHabilidade;
++	        if (!a.startsWith('(') && Array.isArray(palavrasDeHabilidade) && palavrasDeHabilidade.length) {
++	            const referencia = (linhasEmIngles.length ? equivalenteEmIngles : a).trim();
++	            if (!palavrasDeHabilidade.includes(referencia)) {return a;}
++	        }
++	        return '{i}' + a + '{/i}';
++	    });
++	}).join('\n');
+ 	rulesText = curlyQuotes(rulesText).replace(/{Q}/g, '{untap}').replace(/{\u221E}/g, "{inf}").replace(/• /g, '• {indent}');
+ 	rulesText = rulesText.replace('(If this card is your chosen companion, you may put it into your hand from outside the game for {3} any time you could cast a sorcery.)', '(If this card is your chosen companion, you may put it into your hand from outside the game for {3} as a sorcery.)')
+ 
+@@ -5335,6 +5402,8 @@ function processScryfallCard(card, responseCards) {
+ 			face.collector_number = card.collector_number;
+ 			face.lang = card.lang;
+ 			if (card.lang != 'en') {
++				/* script-magic-maker: guarda-texto-em-ingles */
++				face.textoEmIngles = face.oracle_text;
+ 				face.oracle_text = face.printed_text;
+ 				face.name = face.printed_name;
+ 				face.type_line = face.printed_type_line;
+@@ -5346,6 +5415,11 @@ function processScryfallCard(card, responseCards) {
+ 		});
+ 	} else {
+ 		if (card.lang != 'en') {
++			/* script-magic-maker: guarda-texto-em-ingles */
++			// Sem guardar, o texto em ingles se perde aqui - e e ele que diz se a
++			// palavra antes do travessao e palavra-chave (redonda) ou palavra de
++			// habilidade (italica). Ver o uso em changeCardIndex.
++			card.textoEmIngles = card.oracle_text;
+ 			card.oracle_text = card.printed_text;
+ 			card.name = card.printed_name;
+ 			card.type_line = card.printed_type_line;
