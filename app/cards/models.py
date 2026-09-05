@@ -101,8 +101,13 @@ class ScryfallCard(FaceBase):
     full_art: bool = False
     frame_effects: list[str] | None = None
     promo: bool = False
+    promo_types: list[str] | None = None
     textless: bool = False
     finishes: list[str] | None = None
+    # O selo holográfico impresso no rodapé da caixa de regras. O Scryfall diz
+    # qual formato ("oval", "triangle", "acorn"...) e null quando a impressão
+    # não leva selo nenhum.
+    security_stamp: str | None = None
 
     @property
     def traduzida(self) -> bool:

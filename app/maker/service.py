@@ -89,6 +89,11 @@ def moldura_sugerida(carta: ScryfallCard) -> str:
     # e a borderless e a unica que tambem larga a janela de arte.
     if "inverted" in efeitos:
         return MOLDURAS["Borderless"]
+    # Depois das acima de proposito: a impressao de Universes Beyond que
+    # tambem e borderless ou de arte estendida usa a moldura do acabamento, nao
+    # a moldura comum da linha.
+    if "universesbeyond" in (carta.promo_types or []):
+        return MOLDURAS["Universes Beyond"]
     if carta.frame == "2003":
         return MOLDURAS["8th Edition"]
     if carta.frame == "1997":
@@ -421,6 +426,18 @@ async def _redesenhar_texto_final(page: Page) -> None:
     await _esperar_desenho(page)
 
 
+_APLICAR_SELO = carregar("aplicar-selo")
+
+
+async def _aplicar_selo(page: Page, carta: ScryfallCard) -> None:
+    """Precisa rodar depois da moldura: a cor do selo e a dela, e sai do
+    card.frames que o autoFrame monta."""
+    if not carta.security_stamp:
+        return
+    await page.evaluate(_APLICAR_SELO, {"formato": carta.security_stamp})
+    await _esperar_desenho(page)
+
+
 _APLICAR_NOME_TRADUZIDO = carregar("aplicar-nome-traduzido")
 
 
@@ -591,6 +608,7 @@ async def _preencher(
         if await _selecionar_impressao(page, carta):
             await _esperar_desenho(page)
         await _aplicar_moldura(page, carta)
+        await _aplicar_selo(page, carta)
         await _aplicar_marca_dagua(page, carta, moldura)
         await _aplicar_nome_traduzido(page, carta)
         await _redesenhar_texto_final(page)
