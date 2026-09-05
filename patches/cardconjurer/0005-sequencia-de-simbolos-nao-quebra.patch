@@ -1,0 +1,55 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+index 2aa87e5..4ca20cf 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -3607,7 +3607,29 @@ function writeText(textObject, targetContext) {
+ 		}
+ 		lineContext.lineWidth = textOutlineWidth;
+ 		//Begin looping through words/codes
++		/* script-magic-maker: sequencia-de-simbolos-nao-quebra */
++		// Uma sequencia de simbolos de mana e uma unidade so: a carta impressa
++		// nunca deixa "{E}{E}" numa linha e "{E}" na seguinte. Estas duas medem a
++		// sequencia inteira antes de desenhar o primeiro simbolo dela, pra quebra
++		// cair antes da sequencia e nao no meio.
++		const simboloDoItem = function(item) {
++			if (!item || !item.includes('{') || !item.includes('}')) { return undefined; }
++			const codigo = item.toLowerCase().replace('{', '').replace('}', '').replaceAll('/', '');
++			return getManaSymbol(codigo) || getManaSymbol(codigo.split('').reverse().join(''));
++		};
++		const larguraDaSequencia = function(inicio) {
++			const espacamento = textSize * 0.04 + textManaSpacing;
++			var total = 0;
++			for (var i = inicio; i < splitText.length; i++) {
++				const simbolo = simboloDoItem(splitText[i]);
++				if (simbolo == undefined) { break; }
++				total += simbolo.width * textSize * 0.78 + espacamento * 2;
++			}
++			return total;
++		};
++		var indiceDoItem = -1;
+ 		innerloop: for (word of splitText) {
++			indiceDoItem ++;
+ 			var wordToWrite = word;
+ 			/* script-magic-maker: simbolo-de-mana-quebra-linha */
+ 			var simboloPendente = null;
+@@ -3905,9 +3927,17 @@ function writeText(textObject, targetContext) {
+ 			const pontuacaoSolta = /^[.,;:!?)\]»"']+$/.test(wordToWrite || '');
+ 			/* script-magic-maker: simbolo-de-mana-quebra-linha */
+ 			if (simboloPendente && !simboloPendente.posicaoPropria && !textOneLine && textArcRadius == 0
+-					&& currentX > startingCurrentX
+-					&& currentX + simboloPendente.largura + simboloPendente.espacamento * 2 >= textWidth) {
+-				newLine = true;
++					&& currentX > startingCurrentX) {
++				/* script-magic-maker: sequencia-de-simbolos-nao-quebra */
++				// No primeiro simbolo da sequencia vale a largura dela toda; nos
++				// seguintes vale a do simbolo, que ja e o resto da mesma sequencia.
++				const comecaSequencia = simboloDoItem(splitText[indiceDoItem - 1]) == undefined;
++				const aCaber = comecaSequencia
++					? larguraDaSequencia(indiceDoItem)
++					: simboloPendente.largura + simboloPendente.espacamento * 2;
++				if (currentX + aCaber >= textWidth) {
++					newLine = true;
++				}
+ 			}
+ 			//if the word goes past the max line width, go to the next line
+ 			if (wordToWrite && !pontuacaoSolta && lineContext.measureText(wordToWrite).width + currentX >= textWidth && textArcRadius == 0) {
