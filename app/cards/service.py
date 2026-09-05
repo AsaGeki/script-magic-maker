@@ -155,6 +155,109 @@ async def find_card_by_print(
         return carta
 
 
+# Campos de aparencia que a impressao em portugues as vezes deixa em branco
+# mesmo existindo na inglesa - sem eles a moldura sai errada.
+# `full_art` fica de fora porque o valor vazio dele e False, indistinguivel de
+# um False de verdade.
+CAMPOS_DE_MOLDURA = ("frame_effects", "border_color", "frame")
+
+
+async def completar_moldura_do_ingles(carta: ScryfallCard) -> None:
+    """Preenche pela impressao em ingles os campos de aparencia que vierem
+    vazios na impressao em portugues.
+
+    O Scryfall descreve as duas impressoes como cartas separadas e nem sempre
+    repete a aparencia na traduzida: ONE #287 vem com frame_effects
+    ["showcase", "inverted"] em ingles e nulo em portugues, e sem isso a carta
+    sai na moldura comum em vez da de arte sangrada. E a mesma carta fisica,
+    entao o dado da inglesa vale.
+    """
+    if carta.lang == "en":
+        return
+    faltando = [campo for campo in CAMPOS_DE_MOLDURA if getattr(carta, campo) in (None, [])]
+    if not faltando:
+        return
+    async with _cliente() as client:
+        resposta = await _get(client, f"/cards/{carta.set}/{carta.collector_number}/en")
+    if resposta.status_code != 200:
+        return
+    em_ingles = resposta.json()
+    for campo in faltando:
+        valor = em_ingles.get(campo)
+        if valor not in (None, []):
+            setattr(carta, campo, valor)
+
+
+def preferir_traducao_do_arena(carta: ScryfallCard) -> bool:
+    """Se vale trocar o texto impresso pelo do MTG Arena nesta carta.
+
+    So quando a carta nao tem portugues NENHUM no Scryfall e o Arena tem nome
+    ou regra - preenche o buraco do corte de traducao sem pisar em texto que
+    ja saiu impresso oficialmente (esse pode so ter mudado por errata, e o
+    objetivo e reproduzir o que foi impresso).
+
+    Nome e regra contam separado porque ficha costuma ter so um dos dois.
+    """
+    return not carta.traduzida and bool(carta.arena and (carta.arena.nome or carta.arena.texto))
+
+
+async def completar_traducao_parcial(carta: ScryfallCard) -> None:
+    """Preenche pelas irmas em portugues os campos traduzidos que o Scryfall
+    deixou vazios NESTA impressao.
+
+    Acontece em colecao especial e promo: SPG #48 traz o nome "Resistencia" e
+    a linha de tipo nula, e a carta saia com "Creature - Elemental
+    Incarnation" no meio do texto em portugues. Outra impressao da mesma carta
+    tem o campo preenchido.
+
+    So vale pra impressao que ja e em portugues - completar uma impressao em
+    ingles renderia carta meio traduzida. Texto de regras fica de fora: entre
+    duas impressoes ele pode ter mudado por errata, e o objetivo e reproduzir
+    o que esta impresso nesta.
+    """
+    if not carta.traduzida:
+        return
+    faltando = [
+        campo for campo in ("printed_name", "printed_type_line") if not getattr(carta, campo)
+    ]
+    if not faltando:
+        return
+
+    async with _cliente() as client:
+        irmas = await _buscar(client, f'!"{carta.name}"', "pt", unique="prints")
+    for irma in irmas:
+        for campo in list(faltando):
+            if valor := getattr(irma, campo):
+                setattr(carta, campo, valor)
+                faltando.remove(campo)
+        if not faltando:
+            return
+
+
+def e_terreno_basico(carta: ScryfallCard) -> bool:
+    return (carta.type_line or "").lower().startswith("basic land")
+
+
+async def traduzir_terreno_basico(carta: ScryfallCard) -> None:
+    """Poe o nome em portugues num terreno basico que so existe em ingles.
+
+    Terreno basico tem nome fixo e nao tem texto de regras - a caixa leva so a
+    marca d'agua do simbolo de mana -, entao o nome traduzido de qualquer
+    outra impressao vale pra esta. Nao serve pra carta com texto, onde uma
+    impressao pode ter recebido errata que a outra nao tem.
+
+    Altera a carta no lugar e nao faz nada quando ja ha nome traduzido.
+    """
+    if carta.printed_name or carta.traduzida or not e_terreno_basico(carta):
+        return
+    async with _cliente() as client:
+        impressoes = await _buscar(client, f'!"{carta.name}"', "pt", unique="cards")
+    if not impressoes or not impressoes[0].printed_name:
+        return
+    carta.printed_name = impressoes[0].printed_name
+    carta.printed_type_line = impressoes[0].printed_type_line
+
+
 async def find_card_by_id(card_id: str) -> ScryfallCard:
     async with _cliente() as client:
         resposta = await _get(client, f"/cards/{card_id}")
