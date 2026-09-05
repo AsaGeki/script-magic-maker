@@ -19,6 +19,7 @@ from types import TracebackType
 
 from app.config import CARDCONJURER_DIR, CARDCONJURER_PORT
 from app.errors import BadRequestError
+from app.vendor import patches
 from app.vendor.repo import garantir_instalado
 
 TEMPO_LIMITE_SUBIDA = 10.0  # segundos esperando o servidor aceitar conexão
@@ -29,6 +30,16 @@ TEMPO_LIMITE_SUBIDA = 10.0  # segundos esperando o servidor aceitar conexão
 # insere no texto da carta saem como "â€™" na imagem. O HTML do Card Conjurer não
 # tem <meta charset>, então quem precisa dizer isso é o servidor.
 TIPOS_COM_CHARSET = ("text/", "application/javascript", "application/json")
+
+# Só a index da raiz do Card Conjurer é uma página inteira; as outras (creator,
+# print, theme...) são fragmentos que começam nesta marca e dependem de alguém
+# grudar o cabeçalho e o rodapé em volta. O nginx do repositório não faz isso,
+# então quem serve estático precisa montar - sem o cabeçalho a página sobe sem
+# nenhum <link> de css, nenhuma @font-face entra no document.fonts e todo texto
+# de carta cai na fonte de reserva do navegador.
+MARCA_DE_FRAGMENTO = b"<!-- START OF CONTENT -->"
+CABECALHO_GLOBAL = Path("globalHTML/header.html")
+RODAPE_GLOBAL = Path("globalHTML/footer.html")
 
 
 class _HandlerSilencioso(SimpleHTTPRequestHandler):
@@ -46,6 +57,35 @@ class _HandlerSilencioso(SimpleHTTPRequestHandler):
         if tipo.startswith(TIPOS_COM_CHARSET) and "charset=" not in tipo:
             return f"{tipo}; charset=utf-8"
         return tipo
+
+    def do_GET(self) -> None:
+        pagina = self._pagina_montada()
+        if pagina is None:
+            super().do_GET()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(pagina)))
+        self.end_headers()
+        self.wfile.write(pagina)
+
+    def _pagina_montada(self) -> bytes | None:
+        """A página pedida com cabeçalho e rodapé em volta, ou None quando o
+        pedido não é um fragmento (aí o handler padrão serve o arquivo)."""
+        caminho = Path(self.translate_path(self.path))
+        if caminho.is_dir():
+            caminho = caminho / "index.html"
+        if caminho.suffix != ".html" or not caminho.is_file():
+            return None
+
+        conteudo = caminho.read_bytes()
+        if not conteudo.lstrip().startswith(MARCA_DE_FRAGMENTO):
+            return None
+
+        raiz = Path(self.directory)
+        cabecalho = (raiz / CABECALHO_GLOBAL).read_bytes()
+        rodape = (raiz / RODAPE_GLOBAL).read_bytes()
+        return cabecalho + conteudo + rodape
 
 
 def porta_livre(porta: int, host: str = "127.0.0.1") -> bool:
@@ -73,6 +113,13 @@ class ServidorCardConjurer:
 
     def start(self) -> "ServidorCardConjurer":
         garantir_instalado(self.diretorio)
+        faltando = patches.pendentes(self.diretorio)
+        if faltando:
+            nomes = ", ".join(p.name for p in faltando)
+            raise BadRequestError(
+                f"O Card Conjurer esta sem os patches do projeto ({nomes}). "
+                "Rode 'uv run cli.py setup' antes de gerar carta."
+            )
 
         if not porta_livre(self.porta):
             raise BadRequestError(
