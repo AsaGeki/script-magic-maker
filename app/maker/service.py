@@ -20,6 +20,8 @@ from playwright.async_api import Browser, Page, Route, async_playwright
 
 from app.cards.enums import Layout
 from app.cards.models import ScryfallCard
+from app.cards.palavras_chave import palavras_de_habilidade
+from app.cards.service import e_terreno_basico
 from app.config import (
     CARDCONJURER_URL,
     HEADLESS,
@@ -27,6 +29,7 @@ from app.config import (
 )
 from app.errors import BadRequestError, UpstreamError
 from app.maker import arte
+from app.maker.browser import carregar
 from app.slug import slug
 from app.vendor.server import ServidorCardConjurer
 
@@ -62,14 +65,22 @@ def moldura_sugerida(carta: ScryfallCard) -> str:
     outra ainda pode trocar depois.
     """
     efeitos = carta.frame_effects or []
-    if carta.border_color == "borderless":
-        return MOLDURAS["Borderless"]
     if "etched" in efeitos:
         return MOLDURAS["Etched"]
+    # Borderless antes de full art: carta de arte cheia E sem borda (o terreno
+    # basico das colecoes recentes) fica melhor na borderless, que leva a arte
+    # ate a aresta; a "Full art (fiel)" ainda desenha moldura de pedra em volta.
+    if carta.border_color == "borderless":
+        return MOLDURAS["Borderless"]
     if carta.full_art:
         return MOLDURAS["Full art (fiel)"]
     if "extendedart" in efeitos:
         return MOLDURAS["Arte estendida"]
+    # O showcase "inverted" (o ichor de Phyrexia: Tudo Sera Um) tem a arte
+    # sangrando ate a borda; o catalogo do Card Conjurer nao tem essa moldura,
+    # e a borderless e a unica que tambem larga a janela de arte.
+    if "inverted" in efeitos:
+        return MOLDURAS["Borderless"]
     if carta.frame == "2003":
         return MOLDURAS["8th Edition"]
     if carta.frame == "1997":
@@ -109,120 +120,42 @@ LAYOUTS_DE_DUAS_FACES = frozenset(
     }
 )
 
-# Amostra reduzida do canvas, usada so pra saber se o desenho parou de mudar.
-_IMPRESSAO_DIGITAL = """() => {
-    if (typeof cardCanvas === 'undefined' || !cardCanvas.width) { return null; }
-    const mini = document.createElement('canvas');
-    mini.width = 32;
-    mini.height = 44;
-    mini.getContext('2d').drawImage(cardCanvas, 0, 0, mini.width, mini.height);
-    return mini.toDataURL();
-}"""
-
-_SELECIONAR_IMPRESSAO = """(i) => {
-    document.querySelector('#import-index').value = String(i);
-    changeCardIndex();
-}"""
-
-# importCard() do proprio site so cria <option> quando card.type_line e
-# verdadeiro - e processScryfallCard() faz `card.type_line = card.printed_type_line`
-# e `card.oracle_text = card.printed_text`, os dois sem fallback nenhum pro
-# ingles. Quando o Scryfall tem uma impressao pt parcial (nome traduzido,
-# type_line/oracle_text ainda null - o mesmo problema de dado incompleto
-# documentado em app.cards.models), a carta some do dropdown em silencio e
-# trava o resto do fluxo (type_line vazio) ou sai com a caixa de texto em
-# branco (oracle_text vazio) - os dois corrigidos aqui do mesmo jeito.
-#
-# Tambem e aqui, e nao depois via override, que a traducao do Arena entra
-# (quando pedida): fetchScryfallData ja roda processScryfallCard() antes de
-# chamar este callback, entao name/oracle_text/flavor_text aqui sao os campos
-# FINAIS que changeCardIndex() vai ler. Patchar antes de importCard() faz o
-# proprio site aplicar curlyQuotes, itailico de reminder text e formatacao de
-# flavor uma vez so - a mesma coisa que ele faz pra carta com pt de verdade.
-_IMPORTAR_CARTAS = """(args) => {
-    const { nome, idAlvo, tipoDeReserva, textoDeReserva, tipoTraduzido, arenaId, arenaNome, arenaTexto, arenaFlavor } = args;
-    fetchScryfallData(nome, (cards) => {
-        cards.forEach((c) => {
-            if (!c.type_line || c.type_line === 'Card') {
-                c.type_line = tipoDeReserva;
-            }
-            if (!c.oracle_text) {
-                c.oracle_text = textoDeReserva;
-            }
-            // Linha de tipo traduzida fora do Scryfall (ficha, ver
-            // app.cards.fichas): a impressao e em ingles, entao o
-            // processScryfallCard() do proprio site nao tem printed_type_line
-            // pra aplicar sozinho.
-            if (tipoTraduzido && c.id === idAlvo) {
-                c.type_line = tipoTraduzido;
-            }
-            if (arenaId && c.id === arenaId) {
-                c.name = arenaNome;
-                if (arenaTexto) c.oracle_text = arenaTexto;
-                if (arenaFlavor) c.flavor_text = arenaFlavor;
-            }
-        });
-        // importCard() desenha a impressao do indice 0 sozinho. Colocando a
-        // impressao que queremos ja na frente, ele acerta de primeira - sem
-        // isso, desenhava a errada e so depois _selecionar_impressao() (Python)
-        // trocava e desenhava tudo de novo, dobrando o tempo de composicao das
-        // camadas.
-        const indiceAlvo = cards.findIndex((c) => c.id === idAlvo);
-        if (indiceAlvo > 0) {
-            const [alvo] = cards.splice(indiceAlvo, 1);
-            cards.unshift(alvo);
-        }
-        importCard(cards);
-    }, 'prints');
-}"""
-
-# autoFrame() e cardFrameProperties() (do proprio gerador) decidem a moldura
-# procurando "Land", "Artifact", "Vehicle", "Creature" e "Add" DENTRO da linha
-# de tipo e do texto de regras, tudo literal em ingles. Com a carta em
-# portugues nenhuma dessas comparacoes bate: terreno vira moldura de artefato,
-# veiculo perde a caixa de P/R propria, e a cor do terreno (que sai do "Add"
-# do texto) nunca e encontrada. Emprestar a linha de tipo e o texto em ingles
-# so durante a chamada resolve todas de uma vez, sem tocar em vendor/.
-#
-# Restaurar logo depois e seguro porque as funcoes de moldura recebem o texto
-# por argumento - o valor ja foi lido quando esta linha roda. E escrever em
-# card.text[...].text direto (em vez de passar pela caixa de texto da
-# interface) nao dispara textEdited(), que agendaria um autoFrame() novo, com
-# o portugues de volta, 500ms depois.
-_APLICAR_MOLDURA = """(args) => {
-    const tipoPt = card.text.type.text;
-    const regrasPt = card.text.rules.text;
-    card.text.type.text = args.tipoIngles;
-    card.text.rules.text = args.regrasIngles;
-    autoFrame();
-    card.text.type.text = tipoPt;
-    card.text.rules.text = regrasPt;
-}"""
-
-# O gerador desenha o custo de mana por cima do titulo, cada um na sua caixa, e
-# nao encolhe uma por causa da outra - em ingles os nomes cabem, em portugues
-# nao (pior na moldura Seventh, de titulo maior). Encurtar a caixa do titulo
-# ate onde o custo comeca faz o proprio writeText() reduzir a fonte ate caber.
-#
-# A conta do avanco por simbolo e a mesma do writeText(): largura do simbolo
-# 0.78 do corpo da fonte, mais o espacamento dos dois lados.
-_AJUSTAR_TITULO = """() => {
-    const titulo = card.text.title;
-    const mana = card.text.mana;
-    if (!titulo || !mana || !mana.text) { return; }
-    const simbolos = (mana.text.match(/{[^}]*}/g) || []).length;
-    if (!simbolos) { return; }
-
-    const corpo = card.height * (mana.size || 0.038);
-    const espacamento = corpo * 0.04 + card.width * (mana.manaSpacing || 0);
-    const larguraDoCusto = simbolos * (corpo * 0.78 + espacamento * 2);
-    const inicioDoCusto = card.width * ((mana.x || 0) + mana.width) - larguraDoCusto;
-    const folga = card.width * 0.012;
-    const fimDoTitulo = card.width * (titulo.x + titulo.width);
-    if (fimDoTitulo > inicioDoCusto - folga) {
-        titulo.width = (inicioDoCusto - folga) / card.width - titulo.x;
+# Layout que precisa de uma moldura propria - capitulo na lateral, duas
+# metades, caixa de lealdade. O fluxo daqui monta so a moldura normal, entao
+# essas cartas saiam com o texto todo espremido na caixa de regras, sem aviso.
+# Recusar e melhor que entregar carta errada calado.
+LAYOUTS_SEM_MOLDURA_PROPRIA = frozenset(
+    {
+        Layout.SAGA,
+        Layout.SPLIT,
+        Layout.ADVENTURE,
+        Layout.FLIP,
+        Layout.LEVELER,
+        Layout.CLASS,
+        Layout.CASE,
+        Layout.MUTATE,
+        Layout.BATTLE,
+        Layout.PLANAR,
+        Layout.SCHEME,
+        Layout.VANGUARD,
     }
-}"""
+)
+
+_IMPRESSAO_DIGITAL = carregar("impressao-digital")
+
+_SELECIONAR_IMPRESSAO = carregar("selecionar-impressao")
+
+_IMPORTAR_CARTAS = carregar("importar-cartas")
+
+_APLICAR_MOLDURA = carregar("aplicar-moldura")
+
+_AJUSTAR_TITULO = carregar("ajustar-titulo")
+
+_AJUSTAR_LINHA_DE_TIPO = carregar("ajustar-linha-de-tipo")
+
+
+_AJUSTAR_CAIXA_DE_REGRAS = carregar("ajustar-caixa-de-regras")
+
 
 # Terreno basico nao tem texto de regras impresso: a caixa leva o simbolo de
 # mana grande. Quem desenha isso no gerador e a marca d'agua, e ela precisa da
@@ -237,22 +170,12 @@ MARCA_DAGUA_DE_TERRENO = {
     "G": ("/img/watermarks/g.svg", "#598c52"),
 }
 
-# A cor entra antes da imagem: uploadWatermark() so reposiciona no onload, e
-# watermarkLeftColor() ja redesenha com o que estiver carregado.
-_APLICAR_MARCA_DAGUA = """(args) => {
-    document.querySelector('#watermark-left').value = args.cor;
-    watermarkLeftColor(args.cor);
-    uploadWatermark(args.imagem, 'resetWatermark');
-}"""
+_APLICAR_MARCA_DAGUA = carregar("aplicar-marca-dagua")
 
 INTERVALO_AMOSTRA = 0.3
 AMOSTRAS_IGUAIS = 3  # leituras seguidas sem mudanca = desenho terminou
 TEMPO_LIMITE_DESENHO = 45.0
 TEMPO_LIMITE_ELEMENTO = 30_000  # milissegundos, como o Playwright espera
-
-
-def _e_terreno_basico(carta: ScryfallCard) -> bool:
-    return (carta.type_line or "").lower().startswith("basic land")
 
 
 def _marca_dagua(carta: ScryfallCard) -> tuple[str, str] | None:
@@ -262,7 +185,7 @@ def _marca_dagua(carta: ScryfallCard) -> tuple[str, str] | None:
     do oracle_text ("({T}: Add {R}.)") - assim nao ha tabela de subtipo pra
     manter. Wastes fica de fora: o gerador nao tem svg de incolor.
     """
-    if not _e_terreno_basico(carta):
+    if not e_terreno_basico(carta):
         return None
     simbolo = re.search(r"\{([WUBRG])\}", carta.oracle_text or "")
     return MARCA_DAGUA_DE_TERRENO.get(simbolo.group(1)) if simbolo else None
@@ -276,9 +199,28 @@ def _texto_de_reserva(carta: ScryfallCard) -> str:
     essa excecao o lembrete em ingles do oracle_text - "({T}: Add {W}.)" -
     acabava impresso na carta.
     """
-    if _e_terreno_basico(carta):
+    if e_terreno_basico(carta):
         return ""
     return carta.texto_exibido or ""
+
+
+def _e_planeswalker(carta: ScryfallCard) -> bool:
+    """Planeswalker tem layout "normal" no Scryfall - o que o separa e a linha
+    de tipo, e a moldura dele precisa da caixa de lealdade."""
+    return "planeswalker" in (carta.type_line or "").lower()
+
+
+def _texto_traduzido(carta: ScryfallCard) -> str | None:
+    """Texto de regras a impor na impressao em ingles, ou None pra deixar o
+    que o Scryfall trouxer.
+
+    So terreno basico impoe: ele nao tem regra nenhuma, e o lembrete que vem
+    no oracle_text em ingles - "({T}: Add {G}.)" - nao existe na carta de
+    papel, que leva so a marca d'agua do simbolo de mana.
+    """
+    if carta.lang == "en" and e_terreno_basico(carta):
+        return ""
+    return None
 
 
 async def _filtrar_rede(rota: Route) -> None:
@@ -332,23 +274,11 @@ async def abrir_pagina(browser: Browser) -> Page:
     return page
 
 
-# writeText() (motor de texto do proprio site) troca a ultima letra de uma
-# palavra por um glifo decorativo (area de uso privado do Unicode) quando a
-# fonte do campo e exatamente 'belerenb' e a palavra termina em f/h/m/n/k.
-# Esse glifo nao renderiza no Chromium que o Playwright usa - vira caixa
-# vazia, mesmo a fonte tendo o glifo certo. E so floreio (nao muda a letra),
-# entao registrar a MESMA fonte sob outro nome e trocar o `.font` do campo
-# evita o gatilho (literal, `font.endsWith('belerenb')`) sem editar
-# vendor/cardconjurer.
+# Apelido pra mesma Beleren, registrado sob outro nome (ver
+# browser/trocar-fonte-sem-bug.js pro motivo).
 FONTE_SEM_BUG = "belerenb-sembug"
 
-_TROCAR_PARA_FONTE_SEM_BUG = f"""() => {{
-    Object.values(card.text).forEach((campo) => {{
-        if (campo.font === 'belerenb') {{
-            campo.font = '{FONTE_SEM_BUG}';
-        }}
-    }});
-}}"""
+_TROCAR_PARA_FONTE_SEM_BUG = carregar("trocar-fonte-sem-bug")
 
 
 async def _registrar_fonte_sem_bug(page: Page) -> None:
@@ -472,10 +402,23 @@ async def _redesenhar_texto_final(page: Page) -> None:
     de novo: o segundo reconsultaria /sets e duplicaria o numero do
     colecionador (ver _selecionar_impressao).
     """
-    await page.evaluate(_TROCAR_PARA_FONTE_SEM_BUG)
+    await page.evaluate(_TROCAR_PARA_FONTE_SEM_BUG, FONTE_SEM_BUG)
     await page.evaluate(_AJUSTAR_TITULO)
+    await page.evaluate(_AJUSTAR_LINHA_DE_TIPO)
+    await page.evaluate(_AJUSTAR_CAIXA_DE_REGRAS)
     await page.evaluate("() => drawTextBuffer()")
     await _esperar_desenho(page)
+
+
+_APLICAR_NOME_TRADUZIDO = carregar("aplicar-nome-traduzido")
+
+
+async def _aplicar_nome_traduzido(page: Page, carta: ScryfallCard) -> None:
+    """Poe no titulo o nome traduzido montado fora do Scryfall (hoje, o do
+    terreno basico sem impressao em portugues)."""
+    if carta.lang != "en" or not carta.printed_name:
+        return
+    await page.evaluate(_APLICAR_NOME_TRADUZIDO, carta.printed_name)
 
 
 async def _aplicar_moldura(page: Page, carta: ScryfallCard) -> None:
@@ -542,6 +485,16 @@ async def fill_card(
             f"{carta.nome_exibido} e uma carta de {carta.layout}, que rende duas "
             "imagens; o gerador aqui ainda produz uma face so"
         )
+    if carta.layout in LAYOUTS_SEM_MOLDURA_PROPRIA:
+        raise BadRequestError(
+            f"{carta.nome_exibido} tem layout {carta.layout}, que pede moldura "
+            "propria; o gerador aqui monta so a moldura normal e a carta sairia errada"
+        )
+    if _e_planeswalker(carta):
+        raise BadRequestError(
+            f"{carta.nome_exibido} e planeswalker, que pede a moldura com caixa de "
+            "lealdade; o gerador aqui monta so a moldura normal e a carta sairia errada"
+        )
 
     if browser is not None:
         return await _preencher(browser, carta, pasta_destino, moldura, arte_mtgpics, preferir_arena)
@@ -587,7 +540,9 @@ async def _preencher(
         # estar ali, e o indice de reserva usado antes (0) nem sempre apontava
         # pra uma opcao valida do <select> - o gerador quebrava com
         # "Cannot read properties of undefined (reading 'lang')".
-        usar_arena = preferir_arena and carta.arena is not None and carta.arena.texto is not None
+        usar_arena = preferir_arena and carta.arena is not None and bool(
+            carta.arena.nome or carta.arena.texto
+        )
         await page.evaluate(
             _IMPORTAR_CARTAS,
             {
@@ -601,6 +556,8 @@ async def _preencher(
                 "tipoTraduzido": (
                     carta.printed_type_line if carta.lang == "en" else None
                 ),
+                "textoTraduzido": _texto_traduzido(carta),
+                "palavrasDeHabilidade": list(palavras_de_habilidade()),
                 "arenaId": carta.id if usar_arena else None,
                 "arenaNome": carta.arena.nome if usar_arena else None,
                 "arenaTexto": carta.arena.texto if usar_arena else None,
@@ -624,6 +581,7 @@ async def _preencher(
             await _esperar_desenho(page)
         await _aplicar_moldura(page, carta)
         await _aplicar_marca_dagua(page, carta)
+        await _aplicar_nome_traduzido(page, carta)
         await _redesenhar_texto_final(page)
         if arte_mtgpics:
             await _aplicar_arte(page, carta)
