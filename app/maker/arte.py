@@ -102,16 +102,27 @@ async def _melhor_do_mtgpics(
         )
         return None
 
+    miniaturas = _miniaturas(pagina)
+    # Confirmada a pagina, a miniatura numerada como a impressao e ela mesma -
+    # e o unico criterio exato quando a carta tem varias artes do mesmo
+    # ilustrador. Command Tower (REX) tem duas, e a assinatura de imagem as
+    # separava por dois pontos de distancia, escolhendo a errada.
+    desta_impressao = (carta.set.lower(), carta.collector_number.zfill(3).lower())
     candidatas = []
-    for ident, edicao, numero in _miniaturas(pagina):
-        if not await _e_do_ilustrador(client, ident, carta.artist):
+    for ident, edicao, numero in miniaturas:
+        # Com uma ilustracao so na pagina nao ha o que separar, e o titulo ja
+        # confirmou a carta. Exigir o ilustrador ali dentro so faz perder arte
+        # por divergencia de grafia entre as duas fontes ("Sami Mikkonen" no
+        # MTGPics contra "Sami Makkonen" no Scryfall).
+        if len(miniaturas) > 1 and not await _e_do_ilustrador(client, ident, carta.artist):
             continue
         imagem = await _baixar_imagem(client, _url_da_arte(f"{edicao}/{numero}"))
         if imagem is None:
             continue
         distancia = _distancia(imagem, assinatura_alvo)
         if distancia is not None:
-            candidatas.append((distancia, _pixels(imagem), imagem))
+            e_desta = (edicao.lower(), numero.lower()) == desta_impressao
+            candidatas.append((0 if e_desta else 1, distancia, _pixels(imagem), imagem))
 
     if not candidatas:
         logger.info(
@@ -120,9 +131,10 @@ async def _melhor_do_mtgpics(
             carta.artist,
         )
         return None
-    # Menor distancia decide; empate vai pra imagem maior, que costuma ser a
-    # versao em resolucao maior da mesma arte.
-    return min(candidatas, key=lambda item: (item[0], -item[1]))[2]
+    # A da propria impressao vem primeiro; sem ela, decide a menor distancia, e
+    # o empate vai pra imagem maior, que costuma ser a versao em resolucao
+    # maior da mesma arte.
+    return min(candidatas, key=lambda item: (item[0], item[1], -item[2]))[3]
 
 
 def _url_da_arte(caminho: str) -> str:
@@ -190,13 +202,16 @@ def _e_a_carta(pagina: str, carta: ScryfallCard) -> bool:
     nome era recusada e caia no art_crop.
 
     A face da frente entra sozinha porque o MTGPics titula carta de duas faces
-    so pela primeira.
+    so pela primeira - e quando ele titula as duas, separa por barra simples
+    ("Command Tower/Command Tower"), nao pelas duas do Scryfall.
     """
     achado = _TITULO.search(pagina)
     if achado is None:
         return False
-    titulo = slug(html.unescape(achado.group(1)))
-    return titulo in {slug(carta.name), slug(carta.name.split("//")[0])}
+    titulo = html.unescape(achado.group(1))
+    da_pagina = {slug(titulo), slug(titulo.split("/")[0])}
+    da_carta = {slug(carta.name), slug(carta.name.split("//")[0])}
+    return bool(da_pagina & da_carta)
 
 
 def _miniaturas(pagina: str) -> list[tuple[str, str, str]]:
