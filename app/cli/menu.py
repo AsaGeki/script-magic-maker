@@ -28,6 +28,11 @@ from app.cards.fichas import FichaDoDeck
 from app.cards.models import ScryfallCard
 from app.cards.service import (
     ULTIMA_EDICAO_EM_PORTUGUES,
+    completar_moldura_do_ingles,
+    completar_traducao_parcial,
+    find_card_by_print,
+    preferir_traducao_do_arena,
+    traduzir_terreno_basico,
     find_cards_by_set,
     list_sets,
     search_cards,
@@ -55,10 +60,20 @@ from app.maker.service import (
     fill_card,
     moldura_sugerida,
 )
+from app.deck import legalidade
+from app.print import ficha_tecnica
 from app.print import layout
 from app.print import pdf as print_pdf
 from app.print import verso
-from app.print.service import escrever_copias, ler_copias, montar_lote, repetir_por_copias
+from app.print.service import (
+    conferir_copias,
+    escrever_metadata,
+    impressao_do_arquivo,
+    ler_copias,
+    montar_lote,
+    repetir_por_copias,
+    tem_metadata,
+)
 from app.slug import slug
 from app.vendor.server import ServidorCardConjurer
 
@@ -99,15 +114,6 @@ def _mostrar_tabela(cartas: list[ScryfallCard]) -> None:
     console.print(tabela)
 
 
-def _preferir_arena_por_padrao(carta: ScryfallCard) -> bool:
-    """No lote, so troca pro texto do Arena quando a carta nao tem portugues
-    NENHUM no Scryfall e o Arena tem regra confiavel (ver app.cards.arena) -
-    preenche so o buraco do corte de traducao, sem pisar em texto que ja
-    saiu impresso oficialmente (esse pode so ter mudado por errata, e o
-    objetivo aqui e reproduzir o que foi impresso)."""
-    return not carta.traduzida and bool(carta.arena and carta.arena.texto)
-
-
 async def _gerar_uma(
     carta: ScryfallCard,
     *,
@@ -119,10 +125,10 @@ async def _gerar_uma(
 ) -> Path | None:
     """No lote (`confirmar=False`), a selecao no checkbox ja e a confirmacao.
     `pasta_destino` None cai no padrao de fill_card (output/cards).
-    `preferir_arena` None deixa _preferir_arena_por_padrao decidir por carta."""
+    `preferir_arena` None deixa preferir_traducao_do_arena decidir por carta."""
     if preferir_arena is None:
-        preferir_arena = _preferir_arena_por_padrao(carta)
-    if not carta.traduzida:
+        preferir_arena = preferir_traducao_do_arena(carta)
+    if not carta.traduzida and not carta.printed_name:
         se_arena = "usando traducao do MTG Arena (nao impressa)" if preferir_arena else "vai sair em ingles"
         cor = "magenta" if preferir_arena else "red"
         console.print(f'  [{cor}]![/] "{carta.nome_exibido}" sem impressao PT - {se_arena}')
@@ -216,6 +222,10 @@ async def _escolher_e_gerar(
     if not cartas:
         console.print("  [red]![/] Nenhuma carta encontrada.")
         return []
+    for carta in cartas:
+        await traduzir_terreno_basico(carta)
+        await completar_traducao_parcial(carta)
+        await completar_moldura_do_ingles(carta)
     _mostrar_tabela(cartas)
     sufixo = " (ja vem todas marcadas)" if pre_marcadas else ""
     escolhidas = await questionary.checkbox(
@@ -259,12 +269,21 @@ async def _fluxo_carta_por_nome() -> None:
             impressoes = await search_cards(escolhido) or await search_cards(escolhido, lang="en")
 
     carta = await escolher_impressao(impressoes)
+    await _perguntar_e_gerar(carta)
+
+
+async def _perguntar_e_gerar(carta: ScryfallCard) -> None:
+    """Ficha na tela, escolha de texto e de moldura, e geracao - o rabo comum
+    de todo fluxo que termina numa impressao unica ja decidida."""
+    await traduzir_terreno_basico(carta)
+    await completar_traducao_parcial(carta)
+    await completar_moldura_do_ingles(carta)
     mostrar_ficha(carta)
     preferir_arena = False
-    if carta.arena and carta.arena.texto:
+    if carta.arena and (carta.arena.nome or carta.arena.texto):
         preferir_arena = await questionary.confirm(
             "Usar o texto do MTG Arena (painel acima) em vez do oficial impresso?",
-            default=_preferir_arena_por_padrao(carta),
+            default=preferir_traducao_do_arena(carta),
         ).ask_async()
     moldura = await _confirmar_moldura(carta)
     await _gerar_varias([carta], moldura=moldura, preferir_arena=preferir_arena)
@@ -277,6 +296,41 @@ async def _fluxo_carta_por_termo() -> None:
     async with cronometrar(console, "Buscando no Scryfall"):
         cartas = await search_cards_by_term(termo.strip())
     await _escolher_e_gerar(cartas)
+
+
+async def _fluxo_carta_por_edicao_e_numero() -> None:
+    """Vai direto na impressao exata, pelo par edicao + numero de colecionador.
+
+    Terreno basico e carta com muitas variantes nao saem pelos outros fluxos:
+    a busca por nome devolve uma pagina do Scryfall (175 impressoes, e
+    "Floresta" tem centenas) e a busca por edicao para nas primeiras 60 cartas
+    da colecao. Aqui o par identifica a impressao sozinho, sem lista nenhuma
+    no meio.
+    """
+    codigo = await questionary.text("Codigo da edicao (ex.: EOE, TDM):").ask_async()
+    if not codigo:
+        return
+    numero = await questionary.text("Numero de colecionador (ex.: 266):").ask_async()
+    if not numero:
+        return
+    codigo, numero = codigo.strip().lower(), numero.strip()
+
+    async with cronometrar(console, f"Buscando {codigo.upper()} #{numero}"):
+        carta = await find_card_by_print(codigo, numero)
+        em_portugues = carta is not None
+        if carta is None:
+            carta = await find_card_by_print(codigo, numero, lang="en")
+
+    if carta is None:
+        console.print(f"  [red]![/] {codigo.upper()} #{numero} nao existe no Scryfall.")
+        return
+    if not em_portugues:
+        console.print(
+            f"  [yellow]![/] {codigo.upper()} #{numero} nao tem impressao em "
+            "portugues; seguindo com o texto em ingles."
+        )
+
+    await _perguntar_e_gerar(carta)
 
 
 async def _fluxo_carta_por_edicao() -> None:
@@ -336,6 +390,7 @@ async def _fluxo_carta_por_edicao() -> None:
 FLUXOS_CARTAS = {
     "Buscar por nome": _fluxo_carta_por_nome,
     "Buscar por termo": _fluxo_carta_por_termo,
+    "Buscar por edicao + numero": _fluxo_carta_por_edicao_e_numero,
     "Escolher por edicao": _fluxo_carta_por_edicao,
 }
 
@@ -437,7 +492,11 @@ async def _finalizar_fluxo_deck(cartas: list[ScryfallCard], nome_do_deck: str, p
     geradas = await _escolher_e_gerar(cartas, pre_marcadas=True, pasta_destino=pasta_destino)
     if not geradas:
         return
-    escrever_copias(pasta_destino, geradas)
+
+    async with cronometrar(console, "Conferindo em que modalidades o deck entra"):
+        analise = await legalidade.analisar_deck(cartas)
+    escrever_metadata(pasta_destino, geradas, analise)
+    _mostrar_modalidades(analise)
 
     total = sum(copias for _, copias in geradas)
     if await questionary.confirm(
@@ -445,8 +504,22 @@ async def _finalizar_fluxo_deck(cartas: list[ScryfallCard], nome_do_deck: str, p
     ).ask_async():
         async with cronometrar(console, "Montando o PDF"):
             folhas = montar_lote(repetir_por_copias(geradas))
+            folhas.append(ficha_tecnica.desenhar_ficha(analise, nome_do_deck))
             destino = print_pdf.exportar_pdf(folhas, f"{nome_do_deck}.pdf")
         console.print(f"  [green]OK[/] salvo em [bold]{destino}[/]")
+        console.print("  A ultima pagina do PDF lista as modalidades e as cartas que travam.")
+
+
+def _mostrar_modalidades(analise: legalidade.AnaliseDoDeck) -> None:
+    """Resumo no terminal do que foi gravado no metadata.txt."""
+    liberados = analise.formatos_liberados
+    if liberados:
+        console.print(f"  [green]OK[/] entra em: {', '.join(v.rotulo for v in liberados)}")
+    else:
+        console.print("  [yellow]![/] nenhum formato sancionado - deck casual.")
+    for veredito in analise.vereditos:
+        if not veredito.pode_entrar:
+            console.print(f"    [dim]{veredito.rotulo}: {'; '.join(veredito.impedimentos)}[/]")
 
 
 async def _fluxo_deck_de_arquivo() -> None:
@@ -524,20 +597,103 @@ async def _fluxo_deck_estrutural() -> None:
     )
 
 
+async def _sincronizar_pasta(pasta: Path) -> None:
+    """Reescreve o metadata.txt de uma pasta a partir dos png que estao la.
+
+    Cada arquivo volta a ser uma carta pela edicao e numero que o nome carrega,
+    entao a legalidade sai recalculada em cima do que a pasta tem hoje. As
+    copias ja registradas sao mantidas; png que entrou depois comeca com 1.
+    """
+    rotulo = pasta.relative_to(OUTPUT_DIR).as_posix()
+    copias_atuais = ler_copias(pasta)
+    pares: list[tuple[Path, int]] = []
+    cartas: list[ScryfallCard] = []
+    ignorados: list[str] = []
+
+    async with cronometrar(console, f"Relendo as cartas de {rotulo}"):
+        for imagem in sorted(pasta.glob("*.png")):
+            impressao = impressao_do_arquivo(imagem.name)
+            carta = None
+            if impressao is not None:
+                edicao, numero = impressao
+                carta = await find_card_by_print(edicao, numero) or await find_card_by_print(
+                    edicao, numero, lang="en"
+                )
+            if carta is None:
+                ignorados.append(imagem.name)
+                continue
+            carta.copias = copias_atuais.get(imagem.name, 1)
+            cartas.append(carta)
+            pares.append((imagem, carta.copias))
+
+    if not pares:
+        console.print(f"  [red]![/] {rotulo}: nenhum png com edicao e numero no nome.")
+        return
+
+    async with cronometrar(console, "Conferindo em que modalidades o deck entra"):
+        analise = await legalidade.analisar_deck(cartas)
+    escrever_metadata(pasta, pares, analise)
+
+    total = sum(copias for _, copias in pares)
+    console.print(f"  [green]OK[/] {rotulo}: {len(pares)} carta(s), {total} copia(s).")
+    for nome in ignorados:
+        console.print(f"    [yellow]![/] {nome} ficou de fora - nome sem edicao e numero")
+    _mostrar_modalidades(analise)
+
+
+async def _fluxo_sincronizar_metadata() -> None:
+    """Poe o metadata.txt de volta de acordo com a pasta.
+
+    A pasta muda por fora - carta apagada, carta gerada depois, arquivo
+    renomeado - e o metadata segue descrevendo o deck de antes. Aqui quem manda
+    e a pasta.
+    """
+    pastas = _pastas_com_carta()
+    if not pastas:
+        console.print(f"  [red]![/] Nenhuma pasta com carta em {OUTPUT_DIR}.")
+        return
+
+    opcoes = []
+    for pasta in pastas:
+        faltando, sobrando = conferir_copias(pasta)
+        if not tem_metadata(pasta):
+            estado, fora_de_dia = "sem metadata.txt", True
+        elif faltando or sobrando:
+            estado = f"{len(faltando)} so na pasta, {len(sobrando)} so no metadata"
+            fora_de_dia = True
+        else:
+            estado, fora_de_dia = "em dia", False
+        opcoes.append(
+            questionary.Choice(
+                f"{pasta.relative_to(OUTPUT_DIR).as_posix()} - {estado}",
+                pasta,
+                checked=fora_de_dia,
+            )
+        )
+
+    escolhidas = await questionary.checkbox(
+        "Quais pastas sincronizar? (as fora de dia ja vem marcadas)", choices=opcoes
+    ).ask_async()
+    if not escolhidas:
+        return
+    for pasta in escolhidas:
+        await _sincronizar_pasta(pasta)
+
+
 FLUXOS_DECKS = {
     "Importar lista de arquivo": _fluxo_deck_de_arquivo,
     "Buscar por estrutural": _fluxo_deck_estrutural,
+    "Sincronizar metadata das pastas": _fluxo_sincronizar_metadata,
 }
 
 
 # --- Fluxos de PDF ---------------------------------------------------------
 
 
-def _pastas_de_deck() -> list[Path]:
-    """Toda pasta com png que nao seja a de cartas avulsas (PASTA_CARTAS_AVULSAS)
-    - 1 por deck, veja o comentario de _opcoes_selecao pro motivo. Pega
-    qualquer profundidade porque cada fluxo de deck monta a propria (import de
-    arquivo cai direto em DECKS_DIR/<nome>, estrutural em
+def _pastas_com_carta() -> list[Path]:
+    """Toda pasta com png que nao seja a de cartas avulsas (PASTA_CARTAS_AVULSAS).
+    Pega qualquer profundidade porque cada fluxo de deck monta a propria (import
+    de arquivo cai direto em DECKS_DIR/<nome>, estrutural em
     DECKS_DIR/decks-estruturais/<nome>)."""
     raiz = Path(OUTPUT_DIR)
     return [
@@ -547,13 +703,21 @@ def _pastas_de_deck() -> list[Path]:
     ]
 
 
+def _pastas_de_deck() -> list[Path]:
+    """So as que tem metadata.txt - 1 por deck, veja o comentario de
+    _opcoes_selecao pro motivo. Sem o metadata nao da pra saber quantas copias
+    de cada carta a pasta pede, entao ela nao entra no PDF como deck; quem
+    quiser incluir passa antes pelo sincronizador."""
+    return [pasta for pasta in _pastas_com_carta() if tem_metadata(pasta)]
+
+
 def _opcoes_selecao() -> list[questionary.Choice]:
     """1 opcao por carta avulsa (cards/*.png) + 1 opcao por deck INTEIRO (cada
     pasta de _pastas_de_deck, todas as cartas dali juntas numa escolha so) -
     mesmo esquema do script-yugioh-maker: escolher o deck marca ele de 1 vez,
     sem precisar marcar carta por carta. O valor de cada Choice ja e a lista
     de (caminho, copias) que aquela opcao representa - avulsa usa copias=None
-    (pergunta depois), deck usa o que tiver salvo em copias.txt (1 se nao
+    (pergunta depois), deck usa o que tiver salvo em metadata.txt (1 se nao
     tiver, ver app.print.service)."""
     opcoes = []
     if PASTA_CARTAS_AVULSAS.exists():
@@ -582,6 +746,12 @@ def _validar_quantidade(texto: str) -> bool | str:
 
 async def _escolher_cartas_para_imprimir() -> list[tuple[Path, int]]:
     opcoes = _opcoes_selecao()
+    ignoradas = [pasta for pasta in _pastas_com_carta() if not tem_metadata(pasta)]
+    for pasta in ignoradas:
+        console.print(
+            f"  [yellow]![/] {pasta.relative_to(OUTPUT_DIR).as_posix()} tem carta mas "
+            "nao tem metadata.txt - rode o sincronizador em Decks pra ela entrar."
+        )
     if not opcoes:
         console.print(f"  [red]![/] Nenhuma carta gerada em {OUTPUT_DIR}.")
         return []
