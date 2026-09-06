@@ -67,6 +67,7 @@ from app.print import pdf as print_pdf
 from app.print import verso
 from app.print.service import (
     conferir_copias,
+    copias_da_lista,
     escrever_metadata,
     impressao_do_arquivo,
     ler_copias,
@@ -598,11 +599,14 @@ async def _sincronizar_pasta(pasta: Path) -> None:
     """Reescreve o metadata.txt de uma pasta a partir dos png que estao la.
 
     Cada arquivo volta a ser uma carta pela edicao e numero que o nome carrega,
-    entao a legalidade sai recalculada em cima do que a pasta tem hoje. As
-    copias ja registradas sao mantidas; png que entrou depois comeca com 1.
+    entao a legalidade sai recalculada em cima do que a pasta tem hoje. Quantas
+    copias de cada uma sai da lista que originou a pasta, quando ela ainda esta
+    em output/; sem lista, valem as copias ja registradas, e png que entrou
+    depois comeca com 1.
     """
     rotulo = pasta.relative_to(OUTPUT_DIR).as_posix()
     copias_atuais = ler_copias(pasta)
+    por_impressao, por_nome = copias_da_lista(pasta)
     pares: list[tuple[Path, int]] = []
     cartas: list[ScryfallCard] = []
     ignorados: list[str] = []
@@ -619,7 +623,12 @@ async def _sincronizar_pasta(pasta: Path) -> None:
             if carta is None:
                 ignorados.append(imagem.name)
                 continue
-            carta.copias = copias_atuais.get(imagem.name, 1)
+            carta.copias = (
+                por_impressao.get((carta.set.lower(), carta.collector_number))
+                or por_nome.get(slug(carta.name))
+                or por_nome.get(slug(carta.nome_exibido))
+                or copias_atuais.get(imagem.name, 1)
+            )
             cartas.append(carta)
             pares.append((imagem, carta.copias))
 

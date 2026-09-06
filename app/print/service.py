@@ -7,7 +7,9 @@ from pathlib import Path
 from PIL import Image
 
 from app.deck.legalidade import AnaliseDoDeck
+from app.deck.texto import analisar_lista
 from app.print import layout
+from app.slug import slug
 
 ARQUIVO_METADATA = "metadata.txt"
 
@@ -82,6 +84,32 @@ def ler_copias(pasta: Path) -> dict[str, int]:
         return _copias_do_texto(antigo.read_text(encoding="utf-8"), com_secoes=False)
 
     return {}
+
+
+def lista_do_deck(pasta: Path) -> Path | None:
+    """A lista que originou a pasta, `output/<nome>.txt` ao lado de
+    `output/decks/<nome>/`, ou None quando ela nao esta mais la."""
+    lista = pasta.parent.parent / f"{pasta.name}.txt"
+    return lista if lista.is_file() else None
+
+
+def copias_da_lista(pasta: Path) -> tuple[dict[tuple[str, str], int], dict[str, int]]:
+    """Quantas copias a lista pede de cada carta, por impressao e por nome.
+
+    O metadata guarda copia por ARQUIVO, e arquivo nenhum sobrevive a uma
+    regeração que renomeie; a lista guarda por carta e e a fonte de verdade de
+    quantas o deck pede. Linha sem edicao travada so entra pelo nome.
+    """
+    lista = lista_do_deck(pasta)
+    if lista is None:
+        return {}, {}
+    por_impressao: dict[tuple[str, str], int] = {}
+    por_nome: dict[str, int] = {}
+    for entrada in analisar_lista(lista.read_text(encoding="utf-8")):
+        if entrada.set and entrada.collector_number:
+            por_impressao[(entrada.set.lower(), entrada.collector_number)] = entrada.quantidade
+        por_nome.setdefault(slug(entrada.nome), entrada.quantidade)
+    return por_impressao, por_nome
 
 
 def tem_metadata(pasta: Path) -> bool:
