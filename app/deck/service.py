@@ -23,6 +23,10 @@ async def buscar_cartas_do_deck(
     reescrever a linha depois precisa dela. Uma entrada que falha vira aviso e
     as outras seguem: lista de deck com 1 nome errado nao pode derrubar o lote
     inteiro.
+
+    Linha que travou uma impressao e recebeu outra tambem vira aviso: o codigo
+    pode estar errado (SDL no lugar de SLD) ou a impressao pode nao existir em
+    portugues, e nos dois casos o deck sai diferente do que a lista pediu.
     """
     pares: list[tuple[EntradaDeDeck, ScryfallCard]] = []
     avisos: list[str] = []
@@ -33,10 +37,44 @@ async def buscar_cartas_do_deck(
         except AppError as erro:
             avisos.append(f"{entrada.nome}: {erro.message}")
             continue
+        if trocada := _impressao_trocada(entrada, carta):
+            avisos.append(trocada)
         carta.copias = entrada.quantidade
         pares.append((entrada, carta))
 
     return pares, avisos
+
+
+def _impressao_trocada(entrada: EntradaDeDeck, carta: ScryfallCard) -> str | None:
+    """Aviso quando a linha travou uma impressao e veio outra."""
+    if not entrada.set or not entrada.collector_number:
+        return None
+    pedida = (entrada.set.lower(), entrada.collector_number.lstrip("0").lower())
+    veio = (carta.set.lower(), carta.collector_number.lstrip("0").lower())
+    if pedida == veio:
+        return None
+    return (
+        f"{entrada.nome}: a lista pede {entrada.set.upper()} #{entrada.collector_number}, "
+        f"mas saiu {carta.set.upper()} #{carta.collector_number}"
+    )
+
+
+def juntar_impressoes_repetidas(cartas: list[ScryfallCard]) -> list[ScryfallCard]:
+    """Uma carta por impressao, somando as copias das linhas que cairam nela.
+
+    Duas linhas com impressoes diferentes podem terminar na mesma - por codigo
+    de colecao errado ou por a impressao pedida nao existir em portugues. Sem
+    juntar, o gerador desenha o mesmo arquivo duas vezes e a segunda passada
+    sobrescreve a primeira.
+    """
+    juntadas: dict[tuple[str, str], ScryfallCard] = {}
+    for carta in cartas:
+        chave = (carta.set.lower(), carta.collector_number.lower())
+        if repetida := juntadas.get(chave):
+            repetida.copias += carta.copias
+            continue
+        juntadas[chave] = carta
+    return list(juntadas.values())
 
 
 async def _resolver(entrada: EntradaDeDeck, permitir_ingles: bool) -> ScryfallCard:

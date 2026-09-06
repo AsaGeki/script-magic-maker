@@ -27,7 +27,7 @@ from app.cards.service import (
 )
 from app.config import HEADLESS, OUTPUT_DIR
 from app.deck import legalidade
-from app.deck.service import buscar_cartas_do_deck
+from app.deck.service import buscar_cartas_do_deck, juntar_impressoes_repetidas
 from app.deck.texto import ler_arquivo
 from app.errors import AppError
 from app.maker.service import fill_card, moldura_sugerida
@@ -76,8 +76,10 @@ async def main() -> None:
 
     pares, avisos = await buscar_cartas_do_deck(ler_arquivo(lista), permitir_ingles=True)
     for aviso in avisos:
-        print(f"linha sem carta - {aviso}", flush=True)
-    cartas = await _com_fichas_traduzidas([carta for _, carta in pares])
+        print(f"aviso: {aviso}", flush=True)
+    cartas = await _com_fichas_traduzidas(
+        juntar_impressoes_repetidas([carta for _, carta in pares])
+    )
 
     destino.mkdir(parents=True, exist_ok=True)
     geradas: list[tuple[Path, int]] = []

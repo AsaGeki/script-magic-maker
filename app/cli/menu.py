@@ -43,7 +43,7 @@ from app.cli.preview import escolher_impressao, mostrar_ficha
 from app.cli.stdio import configurar_stdio_utf8
 from app.cli.tempo import cronometrar
 from app.config import CARDCONJURER_URL, HEADLESS, OUTPUT_DIR
-from app.deck.service import buscar_cartas_do_deck
+from app.deck.service import buscar_cartas_do_deck, juntar_impressoes_repetidas
 from app.deck.texto import (
     Chave,
     EntradaDeDeck,
@@ -540,7 +540,7 @@ async def _fluxo_deck_de_arquivo() -> None:
         linhas = travar_impressoes(caminho, trocas)
         console.print(f"  [green]OK[/] {linhas} linha(s) travadas em [bold]{caminho.name}[/].")
 
-    cartas = [carta for _, carta in pares]
+    cartas = juntar_impressoes_repetidas([carta for _, carta in pares])
     cartas += await _escolher_fichas(cartas)
 
     nome_do_deck = slug(caminho.stem)
@@ -586,7 +586,7 @@ async def _fluxo_deck_estrutural() -> None:
     # pra travar a impressao escolhida nele (ver travar_impressoes).
     await _escolher_impressoes(pares)
 
-    cartas = [carta for _, carta in pares]
+    cartas = juntar_impressoes_repetidas([carta for _, carta in pares])
     cartas += await _escolher_fichas(cartas)
 
     nome_do_deck = slug(escolhido.nome)
