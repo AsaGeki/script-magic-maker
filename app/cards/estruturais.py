@@ -1,11 +1,9 @@
 """Decks pre-construidos oficiais (Commander, Planeswalker, Challenger...) via
-MTGJSON - o equivalente Magic ao Structure Deck do script-yugioh-maker (ver
-list_structure_decks/find_cards_by_cardset la).
+MTGJSON.
 
-Nao e API oficial da Wizards (o MTGJSON e comunitario), mas cobre o mesmo
-papel: indice de todo produto pre-construido, cada 1 com a lista exata de
-carta+edicao+numero, o que da pra jogar direto no mesmo pipeline de
-app.deck.service (EntradaDeDeck) usado pra importar lista de arquivo.
+Nao e API da Wizards - o MTGJSON e comunitario -, mas traz o indice de todo
+produto pre-construido com a lista exata de carta+edicao+numero, que entra
+direto no mesmo pipeline de app.deck.service.
 """
 
 import asyncio

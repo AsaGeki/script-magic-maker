@@ -1,23 +1,16 @@
-// importCard() do proprio site so cria <option> quando card.type_line e
-// verdadeiro - e processScryfallCard() faz `card.type_line = card.printed_type_line`
-// e `card.oracle_text = card.printed_text`, os dois sem fallback nenhum pro
-// ingles. Quando o Scryfall tem uma impressao pt parcial (nome traduzido,
-// type_line/oracle_text ainda null - o mesmo problema de dado incompleto
-// documentado em app.cards.models), a carta some do dropdown em silencio e
-// trava o resto do fluxo (type_line vazio) ou sai com a caixa de texto em
-// branco (oracle_text vazio) - os dois corrigidos aqui do mesmo jeito.
+// processScryfallCard() faz `type_line = printed_type_line` e `oracle_text =
+// printed_text` sem fallback pro ingles, e importCard() so cria <option> com
+// type_line verdadeiro: impressao pt parcial some do dropdown ou sai com a
+// caixa de texto vazia. As duas sao remendadas aqui.
 //
-// Tambem e aqui, e nao depois via override, que a traducao do Arena entra
-// (quando pedida): fetchScryfallData ja roda processScryfallCard() antes de
-// chamar este callback, entao name/oracle_text/flavor_text aqui sao os campos
-// FINAIS que changeCardIndex() vai ler. Patchar antes de importCard() faz o
-// proprio site aplicar curlyQuotes, itailico de reminder text e formatacao de
-// flavor uma vez so - a mesma coisa que ele faz pra carta com pt de verdade.
+// A traducao do Arena entra aqui, e nao depois: fetchScryfallData ja rodou o
+// processScryfallCard(), entao estes sao os campos finais que changeCardIndex()
+// le, e o proprio site aplica curly quotes, italico de lembrete e formatacao de
+// flavor uma vez so.
 (args) => {
     const { nome, idAlvo, tipoDeReserva, textoDeReserva, tipoTraduzido, textoTraduzido, arenaId, arenaTexto, arenaFlavor, palavrasDeHabilidade } = args;
-    // Lista oficial do MTGJSON (ver app.cards.palavras_chave): e ela que diz
-    // quais palavras antes do travessao saem em italico. O changeCardIndex
-    // le daqui; sem ela ele cai na lista embutida do proprio gerador.
+    // Lista do MTGJSON (ver app.cards.palavras_chave): diz quais palavras antes
+    // do travessao saem em italico. Sem ela o changeCardIndex usa a embutida.
     window.palavrasDeHabilidade = palavrasDeHabilidade || [];
     fetchScryfallData(nome, (cards) => {
         cards.forEach((c) => {
@@ -27,29 +20,21 @@
             if (!c.oracle_text) {
                 c.oracle_text = textoDeReserva;
             }
-            // Traducao montada fora do Scryfall, que o processScryfallCard()
-            // do proprio site nao tem como aplicar sozinho numa impressao em
-            // ingles: a linha de tipo das fichas (app.cards.fichas) e o texto
-            // vazio do terreno basico (ver _texto_traduzido). O nome nao entra
-            // aqui - ver _aplicar_nome_traduzido.
+            // Traducao montada fora do Scryfall: a linha de tipo das fichas
+            // (app.cards.fichas) e o texto vazio do terreno basico.
             if (c.id === idAlvo) {
                 if (tipoTraduzido) c.type_line = tipoTraduzido;
                 if (textoTraduzido !== null) c.oracle_text = textoTraduzido;
             }
-            // O nome nao entra aqui: importCard() usa c.name pra buscar a arte
-            // no Scryfall, e com o nome traduzido a busca volta vazia - a carta
-            // saia sem o credito do ilustrador. Ele e aplicado depois, junto com
-            // os outros nomes montados por fora (ver _aplicar_nome_traduzido).
+            // O nome fica de fora: importCard() usa c.name pra buscar a arte, e
+            // traduzido a busca volta vazia (ver _aplicar_nome_traduzido).
             if (arenaId && c.id === arenaId) {
                 if (arenaTexto) c.oracle_text = arenaTexto;
                 if (arenaFlavor) c.flavor_text = arenaFlavor;
             }
         });
-        // importCard() desenha a impressao do indice 0 sozinho. Colocando a
-        // impressao que queremos ja na frente, ele acerta de primeira - sem
-        // isso, desenhava a errada e so depois _selecionar_impressao() (Python)
-        // trocava e desenhava tudo de novo, dobrando o tempo de composicao das
-        // camadas.
+        // importCard() desenha a impressao do indice 0 sozinho: pondo a nossa na
+        // frente ele acerta de primeira, sem uma composicao inteira jogada fora.
         const indiceAlvo = cards.findIndex((c) => c.id === idAlvo);
         if (indiceAlvo > 0) {
             const [alvo] = cards.splice(indiceAlvo, 1);

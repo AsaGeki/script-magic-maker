@@ -1,6 +1,5 @@
-"""Leitura de lista de deck em texto - equivalente ao ydk.py do
-script-yugioh-maker, so que aqui o formato e o texto que Moxfield, Archidekt e
-o MTG Arena exportam, nao o .ydk numerico da Konami.
+"""Leitura de lista de deck em texto, no formato que Moxfield, Archidekt e o
+MTG Arena exportam.
 
     4 Lightning Bolt
     4x Raio
@@ -138,14 +137,9 @@ def cartas_unicas(entradas: list[EntradaDeDeck]) -> list[EntradaDeDeck]:
 def travar_impressoes(caminho: Path, escolhas: dict[Chave, tuple[str, str]]) -> int:
     """Grava no arquivo a edicao e o numero escolhidos, uma linha por vez.
 
-    Casa pela chave da linha em vez de guardar o numero da linha porque a
-    mesma carta pode aparecer repetida na lista - todas as ocorrencias da
-    carta escolhida travam na mesma impressao, que e o que cartas_unicas ja
-    tinha juntado numa entrada so.
-
-    O resto do arquivo passa intacto: comentario, cabecalho de secao, linha
-    em branco e linha que ja vinha travada nao sao tocados. Devolve quantas
-    linhas mudaram.
+    Casa pela chave, nao pelo numero da linha: a mesma carta pode aparecer
+    repetida, e todas as ocorrencias travam na mesma impressao. O resto do
+    arquivo passa intacto. Devolve quantas linhas mudaram.
     """
     linhas = caminho.read_text(encoding="utf-8").splitlines()
     trocadas = 0

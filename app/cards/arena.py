@@ -1,17 +1,12 @@
 """Traducao pt do MTG Arena, via o banco publicado por mtgatool-metadata.
 
-Existe pra cobrir o buraco que o Scryfall tem: a Wizards parou de IMPRIMIR
-Magic em portugues depois de Modern Horizons 3 (meados de 2024), mas o Arena
-(cliente digital) continua traduzindo carta nova - so nao sai em papel. Pra
-carta pos-corte, esta e a unica fonte oficial de portugues que existe.
+Cobre o buraco do Scryfall: a Wizards parou de IMPRIMIR em portugues depois de
+Modern Horizons 3, mas o Arena continua traduzindo carta nova. Pra carta
+pos-corte, e a unica fonte oficial de portugues que existe - fonte secundaria,
+so consultada quando o Scryfall nao resolve sozinho.
 
-Mesmo papel do banco oficial da Konami no script-yugioh-maker: fonte
-secundaria, so consultada quando o Scryfall nao resolve sozinho.
-
-O banco vem de https://github.com/mtgatool/mtgatool-metadata (GPL-3.0, gerado
-todo dia a partir dos arquivos do proprio Arena + Scryfall). Isso e dado do
-jogo, nao codigo do gerador - so consumir o JSON publicado nao puxa GPL pro
-projeto.
+O banco vem de https://github.com/mtgatool/mtgatool-metadata (GPL-3.0). E dado
+do jogo, nao codigo: consumir o JSON publicado nao puxa GPL pro projeto.
 """
 
 import asyncio
@@ -38,9 +33,8 @@ _SIMBOLO_ARENA = re.compile(r"\{o([^}]*)\}")
 _bancos: dict[str, dict] = {}
 _indice_pt: dict[tuple[str, str], dict] | None = None
 _trava = asyncio.Lock()
-# Uma vez que o download falhou, para de tentar pelo resto do processo - sem
-# isso, uma busca com dezenas de cartas repetiria o mesmo timeout de rede
-# (ate 60s) uma vez por carta.
+# Depois de uma falha, para de tentar pelo resto do processo: senao uma busca
+# com dezenas de cartas repete o mesmo timeout de rede uma vez por carta.
 _falhou = False
 
 
@@ -48,9 +42,8 @@ _falhou = False
 class TraducaoArena:
     """O que da pra aproveitar da carta traduzida no Arena.
 
-    Sem tipo de carta: Types/Subtypes/Supertypes do Arena sao rotulo interno
-    de categoria (sempre em ingles, em qualquer idioma do banco), nao texto
-    pra mostrar - essa fonte nao tem tipo de carta traduzido.
+    Sem tipo de carta: Types/Subtypes/Supertypes do Arena sao rotulo interno,
+    sempre em ingles, nao texto pra mostrar.
     """
 
     nome: str
@@ -104,11 +97,9 @@ async def _carregar(idioma: str) -> dict:
 def _construir_indice(banco_pt: dict) -> dict[tuple[str, str], dict]:
     """(set do Scryfall, numero do colecionador) -> carta do Arena.
 
-    O campo `Set` de cada carta e o codigo interno do Arena (ex: 'MH3'); o
-    mapeamento pro codigo do Scryfall vive em `sets[nome]['scryfall']`.
-    Carta rebalanceada do Alchemy (IsDigitalOnly) fica de fora - o Card
-    Conjurer ja trata o prefixo 'A-' a parte, e ela nao tem numero de
-    colecionador que bata com nenhuma impressao em papel.
+    O campo `Set` e o codigo interno do Arena; o mapeamento pro do Scryfall
+    vive em `sets[nome]['scryfall']`. Carta rebalanceada do Alchemy
+    (IsDigitalOnly) fica de fora: nao tem impressao em papel que bata.
     """
     codigo_para_scryfall = {
         info["code"]: info["scryfall"]
@@ -130,16 +121,10 @@ def _onde_mora_no_scryfall(
 ) -> tuple[str, str] | None:
     """Em que (edicao, numero) do Scryfall esta impressao do Arena mora.
 
-    Ficha pede tratamento a parte: no Scryfall ela vive numa edicao propria
-    ("TKHM" pra ficha de Khaldheim), mas o Arena guarda com o `Set` da
-    edicao-mae e um numero que colide com o de uma carta de verdade - a ficha
-    Tesouro de KHM #19 sobrescrevia a carta KHM #19 no indice, e a busca
-    devolvia "Tesouro" no lugar da carta. Quem sabe a edicao certa da ficha e
-    o campo `Art`.
-
-    Fora ficha o `Art` nao serve: em 4.327 das 26.517 cartas ele aponta pra
-    onde o Arena pegou a ilustracao, nao pra impressao (Estouro de
-    Rinocerontes e MIR #210, com arte de BTD #51).
+    Ficha vai pelo campo `Art`: no Scryfall ela tem edicao propria ("TKHM"),
+    mas o Arena guarda com o `Set` da edicao-mae e um numero que colide com o
+    de uma carta de verdade. Fora ficha o `Art` nao serve - em milhares de
+    cartas ele aponta pra onde o Arena pegou a ilustracao, nao pra impressao.
     """
     if carta.get("IsToken"):
         arte = carta.get("Art") or {}
@@ -164,11 +149,9 @@ def _reconstruir_regras(
 ) -> str | None:
     """Junta as linhas de AbilityIds, ou None se alguma ainda esta em ingles.
 
-    A traducao do Arena e por linha, nao por carta inteira: e comum uma
-    habilidade vir traduzida e a de baixo nao (verificado em "Necromancia").
-    Card com regra pela metade em ingles ficaria pior que so em ingles numa
-    impressao, entao a regra aqui e tudo ou nada: 1 linha identica ao ingles
-    já derruba a carta inteira pro "sem regra confiavel".
+    A traducao do Arena e por linha, nao por carta: e comum uma habilidade vir
+    traduzida e a de baixo nao. Aqui e tudo ou nada - uma linha identica ao
+    ingles derruba a carta inteira pro "sem regra confiavel".
     """
     linhas = []
     for id_habilidade in carta_pt.get("AbilityIds", []):
@@ -188,10 +171,9 @@ def _reconstruir_regras(
 async def buscar_traducao(codigo_da_edicao: str, numero: str) -> TraducaoArena | None:
     """A traducao do Arena pra impressao exata, se existir no banco.
 
-    None quando a carta nao esta no Arena (promo, produto especial que nunca
-    saiu digital), quando o nome saiu traduzido mas a regra nao (ver
-    _reconstruir_regras), ou quando o banco nao pode ser baixado - essa
-    fonte e so-o-melhor-esforco, nunca deve travar quem chamou.
+    None quando a carta nao esta no Arena, quando a regra nao saiu traduzida
+    (ver _reconstruir_regras) ou quando o banco nao pode ser baixado: esta
+    fonte nunca trava quem chamou.
     """
     global _indice_pt, _falhou
     if _falhou:

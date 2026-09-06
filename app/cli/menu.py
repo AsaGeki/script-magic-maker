@@ -404,12 +404,9 @@ async def _escolher_impressoes(
     """Troca a impressao das cartas que a lista deixou sem edicao travada.
 
     Linha sem "(EDICAO) NUMERO" cai na primeira impressao que o Scryfall
-    devolver, sem escolha nem preview (ver DECK.md) - o que pesa em terreno
-    basico e em carta com muitas variantes. Aqui da pra marcar em quais isso
-    importa e escolher olhando a arte; as nao marcadas seguem no automatico.
-
+    devolver, o que pesa em terreno basico e em carta com muitas variantes.
     Troca a carta no proprio `pares` e devolve as escolhas por chave de linha,
-    pra quem tiver o arquivo em maos poder travar a escolha nele.
+    pra quem tiver o arquivo poder travar a escolha nele.
     """
     soltas = [(entrada, carta) for entrada, carta in pares if not entrada.set]
     if not soltas:
@@ -712,13 +709,12 @@ def _pastas_de_deck() -> list[Path]:
 
 
 def _opcoes_selecao() -> list[questionary.Choice]:
-    """1 opcao por carta avulsa (cards/*.png) + 1 opcao por deck INTEIRO (cada
-    pasta de _pastas_de_deck, todas as cartas dali juntas numa escolha so) -
-    mesmo esquema do script-yugioh-maker: escolher o deck marca ele de 1 vez,
-    sem precisar marcar carta por carta. O valor de cada Choice ja e a lista
-    de (caminho, copias) que aquela opcao representa - avulsa usa copias=None
-    (pergunta depois), deck usa o que tiver salvo em metadata.txt (1 se nao
-    tiver, ver app.print.service)."""
+    """Uma opcao por carta avulsa e uma por deck inteiro, com todas as cartas
+    dele juntas numa escolha so.
+
+    O valor de cada Choice ja e a lista de (caminho, copias): avulsa usa
+    copias=None e pergunta depois, deck usa o que estiver no metadata.txt.
+    """
     opcoes = []
     if PASTA_CARTAS_AVULSAS.exists():
         opcoes += [

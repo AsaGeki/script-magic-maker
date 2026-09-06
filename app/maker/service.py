@@ -1,13 +1,9 @@
 """Automacao do Card Conjurer (Playwright async).
 
-Diferente do script-yugioh-maker, o gerador nao e site de terceiro: e o fork
-auto-hospedado em vendor/ (ver app.vendor), servido em localhost. Por isso nao
-ha preenchimento campo a campo - da pra chamar as funcoes globais do proprio
-gerador, que ja sabem importar do Scryfall no idioma escolhido, escolher a
-moldura e compor as camadas.
-
-A imagem sai lida direto do `cardCanvas`: o `downloadCard()` do site faz o
-mesmo `toDataURL`, mas passando por um `<a download>` que nao interessa aqui.
+O gerador roda auto-hospedado em vendor/ (ver app.vendor), servido em
+localhost, entao nao ha preenchimento campo a campo: da pra chamar as funcoes
+globais dele, que ja sabem importar do Scryfall no idioma escolhido, escolher a
+moldura e compor as camadas. A imagem sai lida direto do `cardCanvas`.
 """
 
 import asyncio
@@ -33,8 +29,7 @@ from app.maker.browser import carregar
 from app.slug import slug
 from app.vendor.server import ServidorCardConjurer
 
-# pasta padrao pra carta avulsa - quem monta deck passa a propria pasta em
-# `pasta_destino`, ver app.cli.menu
+# Carta avulsa; deck passa a propria pasta em `pasta_destino`.
 PASTA_CARTAS_AVULSAS = Path(OUTPUT_DIR) / "cards"
 
 # Molduras do #autoFrame do gerador. A chave e o que aparece no menu.
@@ -60,51 +55,42 @@ MOLDURA_PADRAO = "M15Regular-1"
 def moldura_sugerida(carta: ScryfallCard) -> str:
     """Moldura do #autoFrame mais proxima da impressao real.
 
-    O #autoFrame decide sozinho so cor e tipo (criatura, lendaria etc) - qual
-    familia de moldura usar (M15, 8a edicao, borderless...) ele nao sabe. O
-    Scryfall guarda isso na propria impressao (frame/border_color/
-    frame_effects/full_art), entao da pra resolver sem perguntar - quem quiser
-    outra ainda pode trocar depois.
+    O #autoFrame decide sozinho so cor e tipo; a familia de moldura (M15, 8a
+    edicao, borderless...) sai da propria impressao no Scryfall
+    (frame/border_color/frame_effects/full_art). Quem quiser outra troca depois.
     """
     efeitos = carta.frame_effects or []
-    # Terreno basico de arte cheia vem antes das outras: a carta de papel nao
-    # tem janela de arte, caixa de regras nem linha de credito na moldura, so a
-    # borda da cor e o simbolo de mana no canto - e nenhuma das molduras de
-    # carta comum chega nisso, nem a "Full art (fiel)", que ainda desenha a
-    # moldura de pedra em volta.
+    # Antes das outras: a carta de papel nao tem janela de arte nem caixa de
+    # regras, so a borda da cor e o simbolo de mana no canto, e nenhuma moldura
+    # de carta comum chega nisso.
     if e_terreno_basico(carta) and carta.full_art:
-        # A impressao sem borda vai mais longe: a arte cobre a carta inteira e
-        # o nome fica na faixa de baixo, no lugar da linha de tipo.
+        # Sem borda vai mais longe: arte na carta inteira, nome na faixa de baixo.
         if carta.border_color == "borderless":
             return MOLDURAS["Terreno basico sem borda"]
         return MOLDURAS["Terreno basico de arte cheia"]
     if "etched" in efeitos:
         return MOLDURAS["Etched"]
-    # Borderless antes de full art: carta de arte cheia E sem borda (o terreno
-    # basico das colecoes recentes) fica melhor na borderless, que leva a arte
-    # ate a aresta; a "Full art (fiel)" ainda desenha moldura de pedra em volta.
+    # Antes do full art: arte cheia E sem borda fica melhor na borderless, que
+    # leva a arte ate a aresta.
     if carta.border_color == "borderless":
         return MOLDURAS["Borderless"]
     if carta.full_art:
         return MOLDURAS["Full art (fiel)"]
     if "extendedart" in efeitos:
         return MOLDURAS["Arte estendida"]
-    # O showcase "inverted" (o ichor de Phyrexia: Tudo Sera Um) tem a arte
-    # sangrando ate a borda; o catalogo do Card Conjurer nao tem essa moldura,
-    # e a borderless e a unica que tambem larga a janela de arte.
+    # O showcase "inverted" sangra a arte ate a borda e nao existe no catalogo
+    # do Card Conjurer; a borderless e a que mais se aproxima.
     if "inverted" in efeitos:
         return MOLDURAS["Borderless"]
-    # Depois das acima de proposito: a impressao de Universes Beyond que
-    # tambem e borderless ou de arte estendida usa a moldura do acabamento, nao
-    # a moldura comum da linha.
+    # Depois das de acabamento: impressao de Universes Beyond que tambem e
+    # borderless ou de arte estendida usa a moldura do acabamento.
     if "universesbeyond" in (carta.promo_types or []):
         return MOLDURAS["Universes Beyond"]
     if carta.frame == "2003":
         return MOLDURAS["8th Edition"]
     if carta.frame == "1997":
         return MOLDURAS["Seventh Edition"]
-    # frame "1993" (moldura preta/branca antiga) e "future" nao tem
-    # equivalente no catalogo do Card Conjurer - cai na M15 por padrao.
+    # frame "1993" e "future" nao tem equivalente no catalogo.
     return MOLDURA_PADRAO
 
 
@@ -120,9 +106,8 @@ HOSTS_LIBERADOS = (
     "mtgpics.com",
 )
 
-# Moldura carregada na abertura so pra existir um card.text: sem ele, tanto
-# changeCardIndex() quanto autoFrame() quebram. A definitiva vem depois, do
-# autoFrame, que troca o pacote sozinho conforme a cor e o tipo da carta.
+# So pra existir um card.text na abertura: sem ele, changeCardIndex() e
+# autoFrame() quebram. A moldura definitiva vem do autoFrame.
 GRUPO_INICIAL = "Standard-3"
 PACOTE_INICIAL = "M15Regular-1"
 
@@ -138,10 +123,9 @@ LAYOUTS_DE_DUAS_FACES = frozenset(
     }
 )
 
-# Layout que precisa de uma moldura propria - capitulo na lateral, duas
-# metades, caixa de lealdade. O fluxo daqui monta so a moldura normal, entao
-# essas cartas saiam com o texto todo espremido na caixa de regras, sem aviso.
-# Recusar e melhor que entregar carta errada calado.
+# Layout que precisa de moldura propria - capitulo na lateral, duas metades,
+# caixa de lealdade. Como o fluxo daqui monta so a moldura normal, a carta sai
+# com o texto espremido na caixa de regras: melhor recusar.
 LAYOUTS_SEM_MOLDURA_PROPRIA = frozenset(
     {
         Layout.SAGA,
@@ -175,11 +159,10 @@ _AJUSTAR_LINHA_DE_TIPO = carregar("ajustar-linha-de-tipo")
 _AJUSTAR_CAIXA_DE_REGRAS = carregar("ajustar-caixa-de-regras")
 
 
-# Terreno basico nao tem texto de regras impresso: a caixa leva o simbolo de
-# mana grande. Quem desenha isso no gerador e a marca d'agua, e ela precisa da
-# imagem e de uma cor - com watermarkLeft em 'none' o watermarkEdited() nao
-# pinta nada, e com 'default' sai o svg cru, que e preto. Os cinco hex sao os
-# que o proprio seletor de marca d'agua do gerador usa pra cada cor.
+# O simbolo de mana grande na caixa do terreno basico e desenhado como marca
+# d'agua, e ela precisa de imagem e cor: com watermarkLeft em 'none' nada e
+# pintado, com 'default' sai o svg cru, preto. Os hex sao os do proprio seletor
+# do gerador.
 MARCA_DAGUA_DE_TERRENO = {
     "W": ("/img/watermarks/w.svg", "#b79d58"),
     "U": ("/img/watermarks/u.svg", "#8cacc5"),
@@ -199,10 +182,9 @@ TEMPO_LIMITE_ELEMENTO = 30_000  # milissegundos, como o Playwright espera
 def _marca_dagua(carta: ScryfallCard, moldura: str) -> tuple[str, str] | None:
     """Imagem e cor da marca d'agua desta carta, ou None pra deixar sem.
 
-    So terreno basico usa por enquanto, e a cor sai do proprio simbolo de mana
-    do oracle_text ("({T}: Add {R}.)") - assim nao ha tabela de subtipo pra
-    manter. Wastes fica de fora: o gerador nao tem svg de incolor. A moldura de
-    arte cheia tambem: o simbolo de mana ja e camada dela.
+    So terreno basico usa, e a cor sai do simbolo de mana do oracle_text
+    ("({T}: Add {R}.)"). Wastes fica de fora (o gerador nao tem svg de incolor)
+    e as molduras de arte cheia tambem, que ja trazem o simbolo como camada.
     """
     if moldura in (
         MOLDURAS["Terreno basico de arte cheia"],
@@ -218,10 +200,8 @@ def _marca_dagua(carta: ScryfallCard, moldura: str) -> tuple[str, str] | None:
 def _texto_de_reserva(carta: ScryfallCard) -> str:
     """Texto de regras pro caso do Scryfall nao trazer o traduzido.
 
-    Terreno basico fica de fora: printed_text nulo ali nao e dado faltando, e
-    a carta realmente nao ter texto (a caixa leva so o simbolo de mana). Sem
-    essa excecao o lembrete em ingles do oracle_text - "({T}: Add {W}.)" -
-    acabava impresso na carta.
+    Terreno basico fica de fora: printed_text nulo ali nao e dado faltando, e a
+    carta nao ter texto mesmo - so a marca d'agua do simbolo de mana.
     """
     if e_terreno_basico(carta):
         return ""
@@ -229,18 +209,17 @@ def _texto_de_reserva(carta: ScryfallCard) -> str:
 
 
 def _e_planeswalker(carta: ScryfallCard) -> bool:
-    """Planeswalker tem layout "normal" no Scryfall - o que o separa e a linha
-    de tipo, e a moldura dele precisa da caixa de lealdade."""
+    """Planeswalker tem layout "normal" no Scryfall: o que o separa e a linha de
+    tipo, e a moldura dele precisa da caixa de lealdade."""
     return "planeswalker" in (carta.type_line or "").lower()
 
 
 def _texto_traduzido(carta: ScryfallCard) -> str | None:
-    """Texto de regras a impor na impressao em ingles, ou None pra deixar o
-    que o Scryfall trouxer.
+    """Texto de regras a impor na impressao em ingles, ou None pra deixar o que
+    o Scryfall trouxer.
 
-    So terreno basico impoe: ele nao tem regra nenhuma, e o lembrete que vem
-    no oracle_text em ingles - "({T}: Add {G}.)" - nao existe na carta de
-    papel, que leva so a marca d'agua do simbolo de mana.
+    So terreno basico impoe: o lembrete em ingles do oracle_text nao existe na
+    carta de papel.
     """
     if carta.lang == "en" and e_terreno_basico(carta):
         return ""
@@ -260,8 +239,8 @@ async def _filtrar_rede(rota: Route) -> None:
 async def navegador():
     """Abre 1 Chromium com o servidor do Card Conjurer no ar.
 
-    Usado por quem gera 1 carta so; quem gera lote abre uma vez e reusa, que e
-    o gargalo de velocidade gerando varias (ver app.cli.menu).
+    Pra carta avulsa; quem gera lote abre uma vez e reusa, que e o gargalo de
+    velocidade.
     """
     servidor = ServidorCardConjurer().start()
     async with async_playwright() as p:
@@ -277,10 +256,10 @@ async def abrir_pagina(browser: Browser) -> Page:
     """Pagina do criador pronta pra receber import.
 
     enableImportCollectorInfo preenche numero, raridade, edicao e idioma no
-    rodape; autoLoadFrameVersion faz o pacote de molduras se aplicar sozinho;
-    enableCollectorInfo precisa vir escrito daqui porque, quando a chave nao
-    existe, o Card Conjurer grava 'true' mas nao marca a caixa - o rodape so
-    apareceria na segunda visita a pagina.
+    rodape e autoLoadFrameVersion aplica o pacote de molduras sozinho.
+    enableCollectorInfo precisa vir escrito daqui: sem a chave, o Card Conjurer
+    grava 'true' mas nao marca a caixa, e o rodape so apareceria na visita
+    seguinte.
     """
     contexto = await browser.new_context(viewport={"width": 1400, "height": 1000})
     await contexto.route("**/*", _filtrar_rede)
@@ -298,8 +277,7 @@ async def abrir_pagina(browser: Browser) -> Page:
     return page
 
 
-# Apelido pra mesma Beleren, registrado sob outro nome (ver
-# browser/trocar-fonte-sem-bug.js pro motivo).
+# A mesma Beleren sob outro nome (ver browser/trocar-fonte-sem-bug.js).
 FONTE_SEM_BUG = "belerenb-sembug"
 
 _TROCAR_PARA_FONTE_SEM_BUG = carregar("trocar-fonte-sem-bug")
@@ -318,9 +296,8 @@ async def _registrar_fonte_sem_bug(page: Page) -> None:
 async def _carregar_moldura_inicial(page: Page) -> None:
     """Carrega um pacote de molduras pra existir um card.text.
 
-    A pagina abre com o objeto `card` sem `text`, e nesse estado tanto o import
-    quanto a moldura automatica quebram. Escolher grupo e pacote e o que a
-    interface faz quando alguem entra na aba Frame.
+    A pagina abre com `card` sem `text`, e nesse estado o import e a moldura
+    automatica quebram. Escolher grupo e pacote e o que a aba Frame faz.
     """
     await page.select_option("#selectFrameGroup", GRUPO_INICIAL)
     await page.wait_for_function(
@@ -338,8 +315,7 @@ async def _esperar_desenho(page: Page) -> None:
     """Espera o canvas parar de mudar.
 
     O gerador nao avisa quando terminou: arte, simbolo de expansao e camadas de
-    moldura chegam cada um no seu tempo. Entao a saida e amostrar o desenho ate
-    ele se repetir.
+    moldura chegam cada um no seu tempo.
     """
     limite = asyncio.get_running_loop().time() + TEMPO_LIMITE_DESENHO
     anterior = None
@@ -360,20 +336,16 @@ async def _esperar_desenho(page: Page) -> None:
 async def _selecionar_impressao(page: Page, carta: ScryfallCard) -> bool:
     """Escolhe no gerador a mesma impressao que a consulta trouxe.
 
-    Casar pelo id do Scryfall garante a mesma arte, edicao e numero que a API
-    devolveu. Devolve se precisou mesmo trocar de impressao - trocar a toa
-    dispara uma segunda consulta da edicao e o numero do colecionador sai
-    duplicado ("187/361/361").
+    Devolve se precisou mesmo trocar: trocar a toa dispara uma segunda consulta
+    da edicao e o numero do colecionador sai duplicado ("187/361/361").
     """
     indice = await page.evaluate(
         "(id) => scryfallCard.findIndex(c => c.id === id)", carta.id
     )
     if indice is None or indice < 0:
-        # A impressao exata nao veio na busca por nome do proprio gerador (e
-        # raro agora que a busca pede unique='prints', mas ainda pode faltar
-        # em carta com nome tratado diferente, tipo art series). Fica a que o
-        # importCard() ja aplicou sozinho - forcar um indice arbitrario aqui
-        # pode nao ser uma opcao valida do <select> e travar o changeCardIndex().
+        # A impressao exata nao veio na busca do gerador. Fica a que o
+        # importCard() aplicou sozinho: um indice arbitrario pode nao ser opcao
+        # valida do <select> e travar o changeCardIndex().
         return False
     atual = await page.evaluate(
         "() => Number(document.querySelector('#import-index').value)"
@@ -387,9 +359,7 @@ async def _selecionar_impressao(page: Page, carta: ScryfallCard) -> bool:
 async def _aplicar_arte(page: Page, carta: ScryfallCard) -> bool:
     """Troca a arte que o gerador achou sozinho pela maior disponivel.
 
-    O gerador ate tenta o MTGPics, mas passando por um proxy de CORS de
-    terceiro e so pelo numero da propria impressao. Quem escolhe e confere a
-    arte aqui e app.maker.arte; este passo so entrega a imagem pronta.
+    Quem escolhe e confere e o app.maker.arte; aqui a imagem so e entregue.
     """
     data_url = await arte.buscar(carta)
     if data_url is None:
@@ -411,20 +381,15 @@ async def _aplicar_marca_dagua(page: Page, carta: ScryfallCard, moldura: str) ->
 
 
 async def _redesenhar_texto_final(page: Page) -> None:
-    """Ultimo passo antes de salvar: troca a fonte com bug pelo alias sem
-    bug (ver FONTE_SEM_BUG) e forca 1 redesenho de fora da cadeia de callback
-    do XHR do proprio fetchScryfallData.
+    """Ultimo passo antes de salvar: troca a fonte com bug pelo alias sem bug
+    (ver FONTE_SEM_BUG) e redesenha o texto de fora da cadeia de callbacks do
+    XHR do fetchScryfallData.
 
-    O redesenho por fora resolve um bug diferente: quando a carta importada
-    fica no indice 0 (e _selecionar_impressao nao precisa trocar nada),
-    changeCardIndex() e chamado so dali de dentro - encadeado direto no
-    onreadystatechange do XHR de busca - e o titulo sai com o ultimo glifo
-    faltando em moldura tipo "seventh". Chamar drawTextBuffer() de novo, mas
-    por fora, numa chamada evaluate() separada, corrige: o layout/canvas
-    parece nao estar totalmente assentado ainda enquanto o navegador esta no
-    meio do callback do XHR. Usa so drawTextBuffer() e nao changeCardIndex()
-    de novo: o segundo reconsultaria /sets e duplicaria o numero do
-    colecionador (ver _selecionar_impressao).
+    Redesenhar por fora importa: quando a carta fica no indice 0, o
+    changeCardIndex() roda encadeado no onreadystatechange do XHR e o titulo
+    sai com o ultimo glifo faltando em moldura tipo "seventh". So
+    drawTextBuffer(), nunca changeCardIndex() de novo - esse reconsultaria
+    /sets e duplicaria o numero do colecionador (ver _selecionar_impressao).
     """
     await page.evaluate(_TROCAR_PARA_FONTE_SEM_BUG, FONTE_SEM_BUG)
     await page.evaluate(_AJUSTAR_TITULO)
@@ -452,9 +417,8 @@ _APLICAR_NOME_TRADUZIDO = carregar("aplicar-nome-traduzido")
 async def _aplicar_nome_traduzido(
     page: Page, carta: ScryfallCard, *, preferir_arena: bool
 ) -> None:
-    """Poe no titulo o nome traduzido montado fora do Scryfall - o do terreno
-    basico sem impressao em portugues e o do MTG Arena, pra carta que saiu
-    depois do corte de traducao."""
+    """Poe no titulo o nome traduzido montado fora do Scryfall: o do terreno
+    basico sem impressao em portugues e o do MTG Arena."""
     if carta.lang != "en":
         return
     do_arena = carta.arena.nome if preferir_arena and carta.arena else None
@@ -466,9 +430,7 @@ async def _aplicar_nome_traduzido(
 
 async def _aplicar_moldura(page: Page, carta: ScryfallCard) -> None:
     """Refaz a moldura automatica com a linha de tipo em ingles (ver
-    _APLICAR_MOLDURA). Precisa rodar depois do import: e ele que enche
-    card.text.type, e a moldura escolhida na abertura da pagina saiu com a
-    carta ainda vazia."""
+    _APLICAR_MOLDURA). Depois do import: e ele que enche card.text.type."""
     await page.evaluate(
         _APLICAR_MOLDURA,
         {
@@ -480,9 +442,8 @@ async def _aplicar_moldura(page: Page, carta: ScryfallCard) -> None:
 
 
 async def _esperar_fontes(page: Page) -> None:
-    """Espera fonte customizada (molduras antigas usam fonte propria) acabar
-    de carregar antes de ler o canvas - evita capturar o desenho a meio
-    caminho de uma troca de fonte tardia."""
+    """Espera a fonte customizada carregar antes de ler o canvas - senao a
+    captura pega o desenho no meio de uma troca de fonte tardia."""
     await page.evaluate("() => document.fonts.ready")
 
 
@@ -495,8 +456,7 @@ async def _salvar(page: Page, carta: ScryfallCard, pasta_destino: Path | None, m
     pasta = pasta_destino or PASTA_CARTAS_AVULSAS
     pasta.mkdir(parents=True, exist_ok=True)
     nome_base = f"{carta.nome_exibido}-{carta.set}-{carta.collector_number}"
-    # Moldura diferente da automatica muda a imagem pra mesma impressao - sem
-    # o sufixo, gerar de novo com outra moldura sobrescreveria a primeira.
+    # Sem o sufixo, gerar a mesma impressao noutra moldura sobrescreveria.
     if moldura != moldura_sugerida(carta):
         nome_base += f"-{moldura}"
     destino = pasta / f"{slug(nome_base)}.png"
@@ -517,10 +477,8 @@ async def fill_card(
 
     `browser` reusa um Chromium ja aberto; `pasta_destino` (default
     PASTA_CARTAS_AVULSAS) e onde o arquivo vai parar; `moldura` None deixa
-    moldura_sugerida() escolher a partir da impressao real. `preferir_arena`
-    troca titulo e regras pela traducao do MTG Arena depois do preenchimento
-    normal, quando `carta.arena` tiver texto de regras confiavel (ver
-    app.cards.arena) - sem efeito quando nao tiver.
+    moldura_sugerida() decidir; `preferir_arena` usa a traducao do MTG Arena
+    (ver app.cards.arena) quando ela existir.
     """
     moldura = moldura or moldura_sugerida(carta)
     if carta.layout in LAYOUTS_DE_DUAS_FACES:
@@ -557,32 +515,25 @@ async def _preencher(
 ) -> Path:
     page = await abrir_pagina(browser)
     try:
-        # #import-language tem o mesmo onchange="importChanged()" do
-        # #importAllPrints (ver comentario abaixo) - mesmo motivo pra evitar
-        # select_option() aqui. #autoFrame fica com select_option mesmo: o
-        # onchange dele (setAutoFrame -> autoFrame) e trabalho de verdade,
-        # carrega o pacote de moldura que a carta precisa.
+        # Escrito por evaluate, nao por select_option: o onchange do
+        # #import-language e o mesmo importChanged() do #importAllPrints (ver
+        # abaixo). O #autoFrame fica com select_option porque o onchange dele
+        # carrega o pacote de moldura, que e trabalho necessario.
         await page.evaluate(
             "(lang) => { document.querySelector('#import-language').value = lang; }", carta.lang
         )
         await page.select_option("#autoFrame", moldura)
         # Com todas as impressoes na lista, o gerador casa a arte pela
-        # ilustracao da impressao escolhida em vez da primeira que aparecer.
-        # Marca via evaluate, nao page.check(): o checkbox tem
-        # onchange="importChanged()", que dispara uma busca extra no Scryfall
-        # com #import-name vazio (nunca preenchido, ja que a busca de verdade
-        # e a nossa, mais abaixo) - so isso media ~4-5s por carta a toa. So o
-        # ESTADO marcado importa (quem le e artFromScryfall(), nao o evento).
+        # ilustracao da impressao escolhida. Marcado por evaluate, nao por
+        # page.check(): o onchange dispara uma busca extra no Scryfall com o
+        # #import-name vazio, e so o ESTADO marcado importa (quem le e o
+        # artFromScryfall(), nao o evento).
         await page.evaluate("() => { document.querySelector('#importAllPrints').checked = true; }")
 
         nome_busca = carta.name.split(" // ")[0]
-        # unique='prints' e o que importChanged() passa quando #importAllPrints
-        # esta marcado - chamando fetchScryfallData direto (sem passar pela UI)
-        # isso nunca acontecia sozinho, e a busca so trazia 1 impressao por nome.
-        # Sem todas as impressoes na lista, o id da carta escolhida podia nao
-        # estar ali, e o indice de reserva usado antes (0) nem sempre apontava
-        # pra uma opcao valida do <select> - o gerador quebrava com
-        # "Cannot read properties of undefined (reading 'lang')".
+        # A busca abaixo passa unique='prints', o que o importChanged() faria se
+        # a chamada viesse pela interface: sem isso vem uma impressao so por
+        # nome, e o id da carta escolhida pode nem estar na lista.
         usar_arena = preferir_arena and carta.arena is not None and bool(
             carta.arena.nome or carta.arena.texto
         )
@@ -593,9 +544,8 @@ async def _preencher(
                 "idAlvo": carta.id,
                 "tipoDeReserva": carta.tipo_exibido or "Card",
                 "textoDeReserva": _texto_de_reserva(carta),
-                # Impressao em ingles com printed_type_line preenchido so
-                # acontece quando alguem montou a traducao por fora - hoje as
-                # fichas (app.cards.fichas).
+                # Impressao em ingles com printed_type_line so acontece quando a
+                # traducao foi montada por fora - hoje, as fichas.
                 "tipoTraduzido": (
                     carta.printed_type_line if carta.lang == "en" else None
                 ),
@@ -616,8 +566,8 @@ async def _preencher(
                 f'O Card Conjurer nao trouxe nenhuma impressao para "{carta.name}"'
             ) from erro
 
-        # O importCard() ja aplica a primeira impressao sozinho; deixar essa
-        # rodada terminar antes de trocar evita corrida na consulta da edicao.
+        # O importCard() ja aplica a primeira impressao sozinho: deixar essa
+        # rodada terminar evita corrida na consulta da edicao.
         await _esperar_desenho(page)
         if await _selecionar_impressao(page, carta):
             await _esperar_desenho(page)

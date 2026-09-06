@@ -1,11 +1,10 @@
-// O selo holografico impresso no rodape da caixa de regras. O gerador tem as
-// imagens (o pacote M15HoloStamps e a pasta ub/regular/stamp), mas nenhuma das
-// molduras automaticas poe a camada: quem sabe que ESTA impressao leva selo, e
-// de que formato, e o Scryfall.
+// O selo holografico do rodape da caixa de regras. As imagens estao no gerador
+// (pacote M15HoloStamps e pasta ub/regular/stamp), mas nenhuma moldura
+// automatica poe a camada - quem sabe se a impressao leva selo, e de que
+// formato, e o Scryfall.
 //
-// A cor sai do card.frames que o autoFrame acabou de montar - e a mesma da
-// moldura. Ficam de fora a caixa de poder/resistencia e a coroa de lendaria,
-// que tem cor propria e apareceriam antes na pilha.
+// A cor e a da moldura, tirada do card.frames. Caixa de poder/resistencia e
+// coroa de lendaria ficam de fora: tem cor propria e vem antes na pilha.
 (args) => {
     const CORES = {
         'White': 'W', 'Blue': 'U', 'Black': 'B', 'Red': 'R', 'Green': 'G',

@@ -1,20 +1,15 @@
 """Fichas (tokens) que as cartas do deck criam.
 
-O Scryfall liga carta e ficha pelo campo `all_parts`, mas so na impressao em
-ingles - na em portugues ele vem vazio, entao a descoberta passa sempre pela
-inglesa.
+O Scryfall liga carta e ficha pelo `all_parts`, mas so na impressao em ingles,
+e ficha em portugues nao existe la. O portugues e montado de duas fontes:
 
-Ficha em portugues nao existe no Scryfall: `t:token include:extras lang:pt`
-devolve zero, de qualquer edicao. Entao o portugues e montado de duas fontes:
+- **nome**: banco do MTG Arena (ver app.cards.arena);
+- **regras**: o lembrete entre parenteses da carta que cria a ficha, que e
+  texto oficial impresso - so vale quando da pra CONFERIR que a extracao
+  acertou (ver `_regra_em_portugues`).
 
-- **nome**: banco do MTG Arena (ver app.cards.arena), que traz "Tesouro";
-- **regras**: o lembrete entre parenteses da propria carta que cria a ficha,
-  que é texto oficial impresso. So vale quando da pra CONFERIR que a extracao
-  acertou - ver `_regra_em_portugues`.
-
-A linha de tipo e montada peca por peca (ver `_linha_de_tipo_em_portugues`),
-porque nenhuma fonte tem ela pronta: o Arena guarda tipo como rotulo interno,
-sempre em ingles, e o MTGJSON traz ficha com `foreignData` nulo.
+A linha de tipo e montada peca por peca (ver `_linha_de_tipo_em_portugues`):
+nenhuma fonte tem ela pronta.
 """
 
 import asyncio
@@ -44,18 +39,16 @@ _ENTRE_ASPAS = re.compile(r"[\"“”]([^\"“”]+)[\"“”]")
 # O travessao que separa tipo de subtipo na linha de tipo do Scryfall.
 TRAVESSAO = "—"
 
-# "create two Treasure tokens" -> Treasure | "crie duas fichas de Tesouro" ->
-# Tesouro. Servem pra pegar o subtipo que so existe em ficha (Tesouro, Comida,
-# Pista), que carta nenhuma tem pra consultar.
+# Pegam o subtipo que so existe em ficha (Tesouro, Comida, Pista), que carta
+# nenhuma tem pra consultar.
 _SUBTIPO_EN = re.compile(r"\b([A-Z][\w'/-]*(?:\s+[A-Z][\w'/-]*)*)\s+tokens?\b")
 _SUBTIPO_PT = re.compile(
     r"\bfichas?\s+de\s+([A-ZÀ-Ú][\wÀ-ÿ'/-]*(?:\s+[A-ZÀ-Ú][\wÀ-ÿ'/-]*)*)"
 )
 
-# A palavra "ficha" vem DEPOIS do tipo, como o espanhol faz ("Artefacto ficha
-# - Tesoro") e como o proprio portugues ja faz com supertipo ("Criatura
-# Lendaria", "Terreno Basico"). Nao ha ficha em portugues em fonte nenhuma pra
-# confirmar - o Scryfall tem 0, so 2 em espanhol e 39 em japones sem texto.
+# A palavra vem DEPOIS do tipo, como o espanhol faz ("Artefacto ficha - Tesoro")
+# e como o portugues ja faz com supertipo ("Criatura Lendaria"). Nao ha ficha em
+# portugues em fonte nenhuma pra confirmar.
 MARCA_DE_FICHA = "ficha"
 
 
@@ -70,8 +63,8 @@ class FichaDoDeck:
 async def descobrir(cartas: list[ScryfallCard]) -> list[FichaDoDeck]:
     """As fichas que este deck implica, uma por ficha distinta.
 
-    Duas cartas que criam Tesouro rendem uma ficha so - o que muda e a lista
-    de quem cria, que o menu mostra pra dar contexto na hora de escolher.
+    Duas cartas que criam Tesouro rendem uma ficha so; o que muda e a lista de
+    quem cria, que o menu mostra na hora de escolher.
     """
     achadas: dict[str, FichaDoDeck] = {}
 
@@ -115,9 +108,8 @@ async def _montar_ficha(
         logger.info('Ficha "%s" nao pode ser buscada: %s', parte.get("name"), erro)
         return None
 
-    # printed_type_line e o campo que o resto do app ja le como "linha de tipo
-    # no idioma local" (ver tipo_exibido); a ficha nao tem impressao em
-    # portugues, entao ele chega vazio e sobra pra linha montada aqui.
+    # printed_type_line e o campo que o resto do app le como linha de tipo local
+    # (ver tipo_exibido), e na ficha ele chega vazio.
     ficha.printed_type_line = await _linha_de_tipo_em_portugues(client, ficha, criadora)
 
     nome = ficha.arena.nome if ficha.arena else None
@@ -127,8 +119,7 @@ async def _montar_ficha(
         or await _linha_solta_em_portugues(client, ficha)
     )
     if nome or regra:
-        # Reaproveita o caminho que o gerador ja usa pra texto nao impresso
-        # (ver preferir_arena em app.maker.service) em vez de abrir outro.
+        # Pelo caminho que o gerador ja usa pra texto nao impresso.
         ficha.arena = TraducaoArena(
             nome=nome or ficha.nome_exibido,
             texto=regra,
@@ -142,22 +133,17 @@ async def _linha_de_tipo_em_portugues(
 ) -> str | None:
     """Monta "Artefato ficha - Tesouro" a partir da linha em ingles.
 
-    Cada metade sai de dado real, nunca de tabela: o tipo ("Artifact",
-    "Creature") vem da linha de tipo traduzida de uma carta em portugues que
-    tenha o mesmo tipo, e o subtipo idem. Subtipo que so existe em ficha
-    (Tesouro, Comida) nao tem carta pra consultar e cai no lembrete da
-    carta-mae, do mesmo jeito conferido de `_regra_em_portugues`.
-
-    So o lugar da palavra "ficha" e inferido (ver MARCA_DE_FICHA). Se qualquer
-    peca faltar, devolve None e a linha fica inteira em ingles - meia
-    traduzida seria pior.
+    Cada metade sai de dado real, nunca de tabela: o tipo vem da linha
+    traduzida de uma carta em portugues que tenha o mesmo tipo, e o subtipo
+    idem. Subtipo que so existe em ficha cai no lembrete da carta-mae, com a
+    mesma conferencia de `_regra_em_portugues`. So o lugar da palavra "ficha" e
+    inferido. Faltando qualquer peca, devolve None e a linha fica em ingles.
     """
     tipos_en, _, subtipos_en = (ficha.type_line or "").partition(TRAVESSAO)
     tipos_en = re.sub(r"^\s*Token\b", "", tipos_en).strip()
     subtipos_en = subtipos_en.strip()
     if not tipos_en:
-        # Ficha generica ("Copy", "Poison") traz a linha de tipo so com
-        # "Token": nao sobra tipo pra traduzir, e a linha inteira e a marca.
+        # Ficha generica ("Copy") traz so "Token": a linha inteira e a marca.
         return None if subtipos_en else MARCA_DE_FICHA.capitalize()
 
     tipos_pt = await _metade_traduzida(client, tipos_en, subtipo=False)
@@ -180,10 +166,8 @@ async def _metade_traduzida(
 ) -> str | None:
     """Como o portugues escreve esta metade da linha de tipo.
 
-    Procura uma impressao em portugues que tenha exatamente a mesma metade em
-    ingles e le a metade correspondente do `printed_type_line` dela. Comparar
-    a metade inteira, e nao palavra por palavra, evita casar "Artifact" com
-    "Artifact Creature".
+    Procura uma impressao em portugues com exatamente a mesma metade em ingles.
+    Comparar a metade inteira evita casar "Artifact" com "Artifact Creature".
     """
     consulta = " ".join(f't:"{palavra}"' for palavra in em_ingles.split())
     await asyncio.sleep(INTERVALO_ENTRE_REQUISICOES)
@@ -216,9 +200,8 @@ def _metade(linha: str, subtipo: bool) -> str:
 def _subtipo_do_lembrete(criadora: ScryfallCard, em_ingles: str) -> str | None:
     """Subtipo que so existe em ficha, tirado do texto da carta que a cria.
 
-    Mesma conferencia de `_regra_em_portugues`: o subtipo lido do texto em
-    ingles tem que bater com o subtipo da ficha antes de valer a leitura do
-    texto em portugues.
+    Mesma conferencia de `_regra_em_portugues`: o subtipo lido do ingles tem
+    que bater com o da ficha antes de valer a leitura do portugues.
     """
     achado_en = _SUBTIPO_EN.search(criadora.oracle_text or "")
     if not achado_en or achado_en.group(1).strip().lower() != em_ingles.lower():
@@ -230,12 +213,9 @@ def _subtipo_do_lembrete(criadora: ScryfallCard, em_ingles: str) -> str | None:
 def _regra_em_portugues(criadora: ScryfallCard, ficha: ScryfallCard) -> str | None:
     """A regra da ficha em portugues, tirada do lembrete da carta que a cria.
 
-    A carta que cria a ficha descreve ela entre parenteses, com a habilidade
-    entre aspas - texto oficial, ja impresso em portugues. Extrair dali so e
-    confiavel quando da pra provar que a extracao funciona: a MESMA extracao
-    rodada no ingles tem que devolver exatamente o oracle_text da ficha. Se
-    nao devolver, o lembrete nao descreve essa ficha desse jeito e o texto
-    fica em ingles em vez de sair um chute.
+    A prova de que a extracao funciona: a MESMA extracao rodada no ingles tem
+    que devolver exatamente o oracle_text da ficha. Sem isso o texto fica em
+    ingles, em vez de sair um chute.
     """
     conferencia = _ability_entre_aspas(criadora.oracle_text)
     alvo = _sem_ponto_final(ficha.oracle_text)
@@ -247,8 +227,8 @@ def _regra_em_portugues(criadora: ScryfallCard, ficha: ScryfallCard) -> str | No
 # Quantas cartas consultar procurando o lembrete traduzido antes de desistir.
 CANDIDATAS_DE_LEMBRETE = 8
 
-# A linha solta exige varrer mais cartas: a palavra-chave costuma vir
-# junto de outras na mesma linha, e so serve quem a tem sozinha.
+# Mais candidatas: a palavra-chave costuma vir junto de outras na mesma linha,
+# e so serve quem a tem sozinha.
 CANDIDATAS_DE_LINHA_SOLTA = 30
 
 
@@ -257,11 +237,9 @@ async def _regra_de_outra_criadora(
 ) -> str | None:
     """O lembrete da ficha tirado de outra carta que cria a mesma ficha.
 
-    A carta-mae do deck nem sempre descreve a ficha: o Oko em portugues traz so
-    "Crie uma ficha de Comida.", sem o lembrete que o ingles tem. Outras cartas
-    que criam a mesma ficha trazem - e a conferencia continua a mesma, a
-    extracao no ingles tem que bater com o oracle_text da ficha, entao nenhuma
-    candidata entra sem prova.
+    A carta-mae nem sempre descreve a ficha - o Oko em portugues traz so "Crie
+    uma ficha de Comida.". A conferencia continua a mesma: nenhuma candidata
+    entra sem a extracao no ingles bater com o oracle_text da ficha.
     """
     alvo = _sem_ponto_final(ficha.oracle_text)
     if not alvo:
@@ -287,10 +265,9 @@ async def _linha_solta_em_portugues(
 ) -> str | None:
     """Ficha cujo texto e uma linha so, sem lembrete que descreva ela.
 
-    E o caso da palavra-chave sozinha ("Flying"): nao ha carta que a coloque
-    entre aspas, entao a extracao por lembrete nao acha nada. Aqui a prova e
-    outra, a mesma da isencao de italico: numa carta em portugues, a linha
-    equivalente e a que ocupa a MESMA posicao no texto em ingles.
+    E o caso da palavra-chave sozinha ("Flying"), que carta nenhuma poe entre
+    aspas. A prova aqui e outra: numa carta em portugues, a linha equivalente e
+    a que ocupa a MESMA posicao no texto em ingles.
     """
     alvo = (ficha.oracle_text or "").strip()
     if not alvo or len(alvo.splitlines()) != 1:
@@ -314,8 +291,7 @@ async def _linha_solta_em_portugues(
             traduzida = em_portugues[indice].strip()
             if not traduzida or not _mesma_linha(linha, alvo):
                 continue
-            # A ficha que traz lembrete merece uma linha que tambem traga; a
-            # sem lembrete fica guardada caso nao apareca nenhuma completa.
+            # Linha sem lembrete fica de reserva, caso nao venha uma completa.
             if "(" in alvo and "(" not in traduzida:
                 reserva = reserva or traduzida
                 continue
@@ -326,9 +302,8 @@ async def _linha_solta_em_portugues(
 def _mesma_linha(em_ingles: str, alvo: str) -> bool:
     """Duas linhas dizem a mesma coisa.
 
-    O lembrete entre parenteses e comparado a parte porque a mesma
-    palavra-chave sai com redacao um pouco diferente entre a ficha e a carta;
-    o que precisa bater exato e o que vem antes dele.
+    O lembrete entre parenteses fica de fora: a mesma palavra-chave sai com
+    redacao diferente entre a ficha e a carta.
     """
     def sem_lembrete(texto: str) -> str:
         return texto.split("(")[0].strip().rstrip(".").strip().lower()
@@ -347,8 +322,7 @@ def _ability_entre_aspas(texto: str | None) -> str | None:
 
 def _sem_ponto_final(texto: str | None) -> str | None:
     """O ponto final entra ou sai conforme a frase esteja dentro ou fora das
-    aspas, e isso varia de carta pra carta - comparar sem ele evita descartar
-    uma extracao certa por causa de 1 caractere."""
+    aspas, e isso varia de carta pra carta."""
     if not texto:
         return None
     return texto.strip().rstrip(".").strip()

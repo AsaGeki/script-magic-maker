@@ -1,13 +1,11 @@
 """Verso generico de carta - pro lado de tras da folha de impressao duplex.
 
-Toda celula da folha sai identica de proposito: como nenhum verso e diferente
-do outro, o registro fino do duplex (a impressora nunca acerta 100% onde a
-folha 2 cai sobre a 1) deixa de importar - nao tem "verso errado" possivel, so
-"1 verso generico deslocado alguns milimetros", que ainda corta certo.
+Toda celula sai identica de proposito: sem verso diferente do outro, o registro
+do duplex deixa de importar - o pior caso e um verso generico deslocado alguns
+milimetros, que ainda corta certo.
 
-So linha fina, sem area solida preenchida - o verso oficial de Magic e fundo
-marrom solido, que em varias folhas gasta muito mais tinta que uma moldura +
-5 circulos entrelacados.
+So linha fina, sem area solida: o verso oficial de Magic e fundo marrom solido
+e gastaria muito mais tinta.
 """
 
 import math

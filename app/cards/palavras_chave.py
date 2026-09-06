@@ -1,13 +1,9 @@
 """Quais palavras saem em itálico no texto de regras.
 
-Em carta impressa, **palavra de habilidade** (Enrage, Threshold, Landfall) vem
-em itálico antes do travessão; **palavra-chave** (Boast, Evoke, Cycling) vem
-em redondo. O Scryfall não separa as duas — o campo `keywords` devolve
-"Enrage" e "Boast" lado a lado —, mas o MTGJSON publica a divisão oficial em
-`Keywords.json`, com `abilityWords` à parte de `keywordAbilities`.
-
-É de lá que a lista vem, e não de uma tabela mantida aqui: palavra nova
-aparece sozinha na próxima coleção.
+Em carta impressa, **palavra de habilidade** (Enrage, Landfall) vem em itálico
+antes do travessão; **palavra-chave** (Boast, Cycling) vem em redondo. O
+Scryfall não separa as duas, mas o MTGJSON publica a divisão oficial em
+`Keywords.json` — de lá vem a lista, e não de uma tabela mantida aqui.
 """
 
 import json

@@ -1,11 +1,8 @@
-"""Monta a folha A4 com as cartas em grade 3x3 (9 por folha), com linha de
-corte vermelha entre as celulas - 1 "folha" = 1 Image do Pillow representando
-1 pagina A4 inteira. pdf.py so consome essa lista de Image, nao sabe nada de
-grade/mm.
+"""Monta a folha A4 com as cartas em grade 3x3 (9 por folha) e linha de corte
+vermelha entre as celulas.
 
-Mesma grade do script-yugioh-maker; o que muda e o tamanho da carta (Magic e
-63,5x88,9mm contra 59x86mm do Yu-Gi-Oh) e o DPI, maior porque o Card Conjurer
-entrega 2010x2814.
+Uma "folha" e uma Image do Pillow representando a pagina A4 inteira; o pdf.py
+so consome essa lista, sem saber nada de grade nem de milimetro.
 """
 
 from pathlib import Path

@@ -1,13 +1,12 @@
 """Correções nossas aplicadas ao clone do Card Conjurer.
 
-O gerador vem de `app.vendor.repo` e fica fora do controle de versão, então
-correção escrita direto no arquivo dele sumiria no clone seguinte e não
-chegaria em outra máquina. Os patches ficam versionados em
-`patches/cardconjurer/` e o setup aplica depois do clone.
+O gerador vem de `app.vendor.repo` e fica fora do controle de versão: correção
+escrita direto no arquivo dele sumiria no clone seguinte. Os patches ficam
+versionados em `patches/cardconjurer/` e o setup aplica depois do clone.
 
-Cada patch deixa no código a marca `script-magic-maker: <nome>`. É por ela que
-`pendentes()` sabe se o clone está corrigido sem chamar o git — o alvo e a
-marca saem do próprio arquivo de patch, não de uma lista mantida aqui.
+Cada patch deixa no código a marca `script-magic-maker: <nome>`, e é por ela
+que `pendentes()` sabe se o clone está corrigido sem chamar o git. O alvo e a
+marca saem do próprio arquivo de patch.
 """
 
 import re

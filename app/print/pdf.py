@@ -1,8 +1,6 @@
-"""Exporta as folhas montadas (ver layout.py) pra 1 arquivo PDF, 1 pagina por
-folha - pro fluxo "gerar PDF e imprimir manualmente".
+"""Exporta as folhas montadas (ver layout.py) pra um PDF, uma pagina por folha.
 
-Diferente do script-yugioh-maker, que salva pelo proprio Pillow: aqui passa
-pelo img2pdf, que embute o PNG sem recomprimir. O ponto do projeto e carta em
+Pelo img2pdf, que embute o PNG sem recomprimir: o ponto do projeto e carta em
 resolucao de impressao, e recompressao em JPEG comeria justamente isso.
 """
 

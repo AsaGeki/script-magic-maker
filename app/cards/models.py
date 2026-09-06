@@ -15,9 +15,9 @@ from app.cards.enums import Layout, Rarity
 class FaceBase(BaseModel):
     """Os campos que carta e face têm em comum.
 
-    Existe porque carta de dupla face não traz os campos traduzidos no nível de
-    cima — eles vivem só dentro de card_faces. Herdando daqui, carta e face
-    respondem ao mesmo fallback de idioma.
+    Carta de dupla face não traz os campos traduzidos no nível de cima: eles
+    vivem só dentro de card_faces. Herdando daqui, as duas respondem ao mesmo
+    fallback de idioma.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -44,8 +44,7 @@ class FaceBase(BaseModel):
     def nome_exibido(self) -> str:
         """Nome traduzido quando existe.
 
-        Vale lembrar que printed_name às vezes vem em inglês mesmo numa
-        impressão em português — não é sinal de que falta tradução.
+        printed_name às vezes vem em inglês mesmo numa impressão em português.
         """
         return self.printed_name or self.name
 
@@ -83,14 +82,12 @@ class ScryfallCard(FaceBase):
     released_at: date | None = None
     card_faces: list[CardFace] | None = None
 
-    # Campo nosso, não vem da API - quantas cópias o deck pede desta carta,
-    # usado só pela folha de impressão (ver app.print.service).
+    # Campo nosso: quantas cópias o deck pede, usado pela folha de impressão.
     copias: int = 1
 
-    # Também nosso: tradução do MTG Arena pra esta impressão, quando existe
-    # (ver app.cards.arena). Preenchido depois da consulta ao Scryfall, nunca
-    # vem da API. Cobre carta pós-corte de tradução, que só saiu em português
-    # no jogo digital.
+    # Também nosso: tradução do MTG Arena (ver app.cards.arena), preenchida
+    # depois da consulta. Cobre carta pós-corte, que só saiu em português no
+    # jogo digital.
     arena: TraducaoArena | None = None
 
     # Extras que ajudam a escolher moldura caso um dia isso saia do autoFrame.
@@ -104,9 +101,8 @@ class ScryfallCard(FaceBase):
     promo_types: list[str] | None = None
     textless: bool = False
     finishes: list[str] | None = None
-    # O selo holográfico impresso no rodapé da caixa de regras. O Scryfall diz
-    # qual formato ("oval", "triangle", "acorn"...) e null quando a impressão
-    # não leva selo nenhum.
+    # Selo holográfico do rodapé: o formato ("oval", "triangle", "acorn"...) ou
+    # null quando a impressão não leva selo.
     security_stamp: str | None = None
 
     @property
@@ -125,11 +121,10 @@ class ScryfallCard(FaceBase):
 
     @property
     def arte_mtgpics(self) -> str:
-        """Arte no MTGPics, 1920x1080 — a fonte primária de arte.
+        """Arte no MTGPics, a fonte primária.
 
-        O número de colecionador nem sempre é numérico (tem sufixo em promo e
-        variante); nesse caso a URL sai com o valor cru e cabe a quem baixar
-        tratar o 404 e cair no art_crop.
+        O número de colecionador nem sempre é numérico (promo e variante têm
+        sufixo); aí a URL sai com o valor cru e quem baixa trata o 404.
         """
         numero = self.collector_number
         url = f"https://www.mtgpics.com/pics/art/{self.set}/"

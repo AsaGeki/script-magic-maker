@@ -25,18 +25,15 @@ from app.vendor.repo import garantir_instalado
 TEMPO_LIMITE_SUBIDA = 10.0  # segundos esperando o servidor aceitar conexão
 
 
-# Sem charset declarado, o navegador lê o JavaScript como Latin-1 e os acentos
-# escritos no próprio código viram lixo — as aspas curvas que o curlyQuotes()
-# insere no texto da carta saem como "â€™" na imagem. O HTML do Card Conjurer não
-# tem <meta charset>, então quem precisa dizer isso é o servidor.
+# Sem charset declarado o navegador lê o JavaScript como Latin-1 e os acentos
+# do próprio código viram lixo na imagem. O HTML do Card Conjurer não tem
+# <meta charset>, então quem diz isso é o servidor.
 TIPOS_COM_CHARSET = ("text/", "application/javascript", "application/json")
 
-# Só a index da raiz do Card Conjurer é uma página inteira; as outras (creator,
-# print, theme...) são fragmentos que começam nesta marca e dependem de alguém
-# grudar o cabeçalho e o rodapé em volta. O nginx do repositório não faz isso,
-# então quem serve estático precisa montar - sem o cabeçalho a página sobe sem
-# nenhum <link> de css, nenhuma @font-face entra no document.fonts e todo texto
-# de carta cai na fonte de reserva do navegador.
+# Só a index da raiz é uma página inteira; as outras (creator, print, theme...)
+# são fragmentos que começam nesta marca e precisam do cabeçalho e do rodapé em
+# volta. Sem o cabeçalho a página sobe sem nenhum <link> de css e todo texto de
+# carta cai na fonte de reserva do navegador.
 MARCA_DE_FRAGMENTO = b"<!-- START OF CONTENT -->"
 CABECALHO_GLOBAL = Path("globalHTML/header.html")
 RODAPE_GLOBAL = Path("globalHTML/footer.html")

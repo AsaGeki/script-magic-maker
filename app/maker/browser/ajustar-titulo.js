@@ -1,10 +1,9 @@
-// O gerador desenha o custo de mana por cima do titulo, cada um na sua caixa, e
-// nao encolhe uma por causa da outra - em ingles os nomes cabem, em portugues
-// nao (pior na moldura Seventh, de titulo maior). Encurtar a caixa do titulo
-// ate onde o custo comeca faz o proprio writeText() reduzir a fonte ate caber.
+// Titulo e custo de mana ficam em caixas separadas e o gerador nao encolhe uma
+// por causa da outra. Encurtar a do titulo ate onde o custo comeca faz o
+// writeText() reduzir a fonte ate caber.
 //
-// A conta do avanco por simbolo e a mesma do writeText(): largura do simbolo
-// 0.78 do corpo da fonte, mais o espacamento dos dois lados.
+// A conta do avanco por simbolo e a do writeText(): largura 0.78 do corpo da
+// fonte, mais o espacamento dos dois lados.
 () => {
     const titulo = card.text.title;
     const mana = card.text.mana;

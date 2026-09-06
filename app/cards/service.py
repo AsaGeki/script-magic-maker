@@ -1,8 +1,5 @@
-"""Busca de carta no Scryfall - fonte oficial dos dados, sem chave nem
-cadastro (so pede User-Agent identificavel e ~100ms entre requisicoes).
-
-Tudo async: o CLI roda dentro de 1 `asyncio.run()` so (ver app.cli.menu) e o
-Playwright do app.maker tambem e async, entao nao ha versao sincrona.
+"""Busca de carta no Scryfall - sem chave, so User-Agent identificavel e
+~100ms entre requisicoes. Tudo async, como o resto do projeto.
 """
 
 import asyncio
@@ -18,8 +15,7 @@ from app.errors import NotFoundError, UpstreamError
 
 BASE_URL = "https://api.scryfall.com"
 
-# A Wizards parou de imprimir Magic em portugues depois de Modern Horizons 3.
-# Edicao lancada depois disso so existe em ingles - ver docs/PESQUISA.md.
+# A Wizards parou de imprimir em portugues depois de Modern Horizons 3.
 ULTIMA_EDICAO_EM_PORTUGUES = "2024-06-14"
 
 # Tipos de colecao que nao rendem carta pra imprimir.
@@ -31,8 +27,7 @@ TIPOS_DE_EDICAO_IGNORADOS = frozenset(
 INTERVALO_ENTRE_REQUISICOES = 0.1
 TIMEOUT = 30.0
 
-# Quantas edicoes checar em paralelo em list_sets - concorrencia modesta,
-# ainda bem abaixo do limite de 10 req/s do Scryfall mesmo em rajada.
+# Edicoes checadas em paralelo em list_sets, bem abaixo do limite de 10 req/s.
 TAMANHO_DO_LOTE = 5
 
 logger = logging.getLogger(__name__)
@@ -59,9 +54,8 @@ async def _get(
             raise UpstreamError(f"Falha ao consultar o Scryfall: {erro}") from erro
         if resposta.status_code != 429:
             return resposta
-        # Respeita o Retry-After quando vem, mas com teto: o Scryfall as vezes
-        # manda um valor de dezenas de segundos, e nenhuma consulta daqui
-        # justifica ficar parado tanto tempo numa unica tentativa.
+        # Retry-After com teto: o Scryfall as vezes manda dezenas de segundos, e
+        # nenhuma consulta daqui justifica esperar tanto.
         espera = min(float(resposta.headers.get("Retry-After", 1 + tentativa)), ESPERA_MAXIMA_429)
         await asyncio.sleep(espera)
     return resposta
@@ -87,10 +81,10 @@ async def _buscar(
 
 
 async def _enriquecer_com_arena(cartas: list[ScryfallCard]) -> None:
-    """Anexa a traducao do Arena quando existir - sempre tentado, pra dar pra
-    comparar contra o que o Scryfall trouxe (impresso oficial x atual do
-    jogo, que podem divergir por errata). So-o-melhor-esforco: falha de rede
-    ou banco ja e tratada dentro de app.cards.arena, nunca derruba a busca.
+    """Anexa a traducao do Arena quando existir.
+
+    Sempre tentado, pra dar pra comparar com o que o Scryfall trouxe. Falha de
+    rede ou banco e tratada dentro de app.cards.arena e nunca derruba a busca.
     """
     for carta in cartas:
         carta.arena = await arena.buscar_traducao(carta.set, carta.collector_number)
@@ -105,8 +99,7 @@ async def search_cards(nome: str, lang: str = "pt") -> list[ScryfallCard]:
 async def search_cards_by_term(termo: str, limite: int = 30) -> list[ScryfallCard]:
     """Busca livre: o termo aparece em qualquer lugar do nome.
 
-    unique="cards" pra nao repetir a mesma carta uma vez por impressao - quem
-    escolhe impressao e o passo seguinte.
+    unique="cards" pra nao repetir a carta uma vez por impressao.
     """
     async with _cliente() as client:
         achadas = await _buscar(client, termo, "pt", unique="cards")
@@ -155,10 +148,9 @@ async def find_card_by_print(
         return carta
 
 
-# Campos de aparencia que a impressao em portugues as vezes deixa em branco
-# mesmo existindo na inglesa - sem eles a moldura sai errada.
-# `full_art` fica de fora porque o valor vazio dele e False, indistinguivel de
-# um False de verdade.
+# Campos de aparencia que a impressao em portugues as vezes deixa em branco.
+# `full_art` fica de fora: o vazio dele e False, indistinguivel de um False de
+# verdade.
 CAMPOS_DE_MOLDURA = ("frame_effects", "border_color", "frame")
 
 
@@ -166,11 +158,9 @@ async def completar_moldura_do_ingles(carta: ScryfallCard) -> None:
     """Preenche pela impressao em ingles os campos de aparencia que vierem
     vazios na impressao em portugues.
 
-    O Scryfall descreve as duas impressoes como cartas separadas e nem sempre
-    repete a aparencia na traduzida: ONE #287 vem com frame_effects
-    ["showcase", "inverted"] em ingles e nulo em portugues, e sem isso a carta
-    sai na moldura comum em vez da de arte sangrada. E a mesma carta fisica,
-    entao o dado da inglesa vale.
+    O Scryfall trata as duas como cartas separadas e nem sempre repete a
+    aparencia na traduzida - ONE #287 traz frame_effects em ingles e nulo em
+    portugues. E a mesma carta fisica, entao o dado da inglesa vale.
     """
     if carta.lang == "en":
         return
@@ -191,12 +181,9 @@ async def completar_moldura_do_ingles(carta: ScryfallCard) -> None:
 def preferir_traducao_do_arena(carta: ScryfallCard) -> bool:
     """Se vale trocar o texto impresso pelo do MTG Arena nesta carta.
 
-    So quando a carta nao tem portugues NENHUM no Scryfall e o Arena tem nome
-    ou regra - preenche o buraco do corte de traducao sem pisar em texto que
-    ja saiu impresso oficialmente (esse pode so ter mudado por errata, e o
-    objetivo e reproduzir o que foi impresso).
-
-    Nome e regra contam separado porque ficha costuma ter so um dos dois.
+    So quando nao ha portugues NENHUM no Scryfall: assim o corte de traducao e
+    preenchido sem pisar em texto que ja saiu impresso. Nome e regra contam
+    separado porque ficha costuma ter so um dos dois.
     """
     return not carta.traduzida and bool(carta.arena and (carta.arena.nome or carta.arena.texto))
 
@@ -205,15 +192,10 @@ async def completar_traducao_parcial(carta: ScryfallCard) -> None:
     """Preenche pelas irmas em portugues os campos traduzidos que o Scryfall
     deixou vazios NESTA impressao.
 
-    Acontece em colecao especial e promo: SPG #48 traz o nome "Resistencia" e
-    a linha de tipo nula, e a carta saia com "Creature - Elemental
-    Incarnation" no meio do texto em portugues. Outra impressao da mesma carta
-    tem o campo preenchido.
-
-    So vale pra impressao que ja e em portugues - completar uma impressao em
-    ingles renderia carta meio traduzida. Texto de regras fica de fora: entre
-    duas impressoes ele pode ter mudado por errata, e o objetivo e reproduzir
-    o que esta impresso nesta.
+    Acontece em colecao especial e promo: SPG #48 traz o nome traduzido e a
+    linha de tipo nula. So vale pra impressao que ja e em portugues, senao a
+    carta sai meio traduzida. Texto de regras fica de fora: pode ter mudado por
+    errata entre uma impressao e outra.
     """
     if not carta.traduzida:
         return
@@ -241,12 +223,9 @@ def e_terreno_basico(carta: ScryfallCard) -> bool:
 async def traduzir_terreno_basico(carta: ScryfallCard) -> None:
     """Poe o nome em portugues num terreno basico que so existe em ingles.
 
-    Terreno basico tem nome fixo e nao tem texto de regras - a caixa leva so a
-    marca d'agua do simbolo de mana -, entao o nome traduzido de qualquer
-    outra impressao vale pra esta. Nao serve pra carta com texto, onde uma
-    impressao pode ter recebido errata que a outra nao tem.
-
-    Altera a carta no lugar e nao faz nada quando ja ha nome traduzido.
+    Nome fixo e sem texto de regras: o nome traduzido de qualquer impressao
+    vale pra esta. Nao serve pra carta com texto, que pode ter errata. Altera
+    no lugar e nao faz nada quando ja ha nome traduzido.
     """
     if carta.printed_name or carta.traduzida or not e_terreno_basico(carta):
         return
@@ -273,10 +252,8 @@ async def find_card_by_id(card_id: str) -> ScryfallCard:
 async def suggest_names(trecho: str, limite: int = 15) -> list[str]:
     """Nomes que completam o trecho digitado, em portugues.
 
-    O /cards/autocomplete do Scryfall so conhece nome em ingles - buscar
-    "Raio" ali devolve "Samurai of the Pale Curtain", porque casa a sequencia
-    de letras no nome em ingles. Por isso a sugestao em portugues sai da busca
-    normal, e o autocomplete oficial fica como reserva.
+    O /cards/autocomplete do Scryfall so conhece nome em ingles, entao a
+    sugestao sai da busca normal e o autocomplete fica de reserva.
     """
     async with _cliente() as client:
         achadas = await _buscar(client, trecho, "pt", unique="cards")
@@ -311,22 +288,14 @@ async def _tem_impressao_pt(client: httpx.AsyncClient, codigo_da_edicao: str) ->
 async def list_sets(limite: int = 60, so_com_portugues: bool = True) -> list[dict]:
     """Edicoes pro fluxo de gerar carta escolhendo a colecao.
 
-    Fora da lista: colecao digital (Arena), de token e afins, que nao rendem
-    carta pra imprimir. Com `so_com_portugues`, tambem ficam de fora as
-    edicoes sem NENHUMA carta em portugues - verificado de verdade, uma a uma
-    (a data do corte de traducao da Wizards so filtra o grosso antes de
-    gastar requisicao; promo e coleco especial anterior ao corte tambem podem
-    nao ter portugues nenhum, ver docs internos do projeto).
+    Fora da lista: colecao digital, de token e afins. Com `so_com_portugues`,
+    tambem as edicoes sem NENHUMA carta em portugues - verificado uma a uma,
+    porque promo e colecao especial anterior ao corte tambem podem nao ter.
 
-    O `/sets` vem do mais recente pro mais antigo, entao a verificacao para
-    assim que junta `limite` edicoes validas. A data do corte ainda entra como
-    primeiro filtro, so pra nao gastar uma requisicao por edicao checando as
-    dezenas lancadas depois dele - essas sempre falham a verificacao real
-    mesmo assim, entao pular direto poupa tempo sem mudar o resultado.
-
-    A verificacao roda em lotes concorrentes (ver TAMANHO_DO_LOTE), nao 1 por
-    1 - sequencial demorava minutos numa lista grande e o menu ficava sem
-    nenhum retorno na tela, parecendo travado.
+    A data do corte entra so como primeiro filtro, pra nao gastar requisicao
+    com as dezenas lancadas depois dele. O `/sets` vem do mais recente pro mais
+    antigo, entao a verificacao para ao juntar `limite` edicoes, e roda em
+    lotes concorrentes (ver TAMANHO_DO_LOTE).
     """
     async with _cliente() as client:
         resposta = await _get(client, "/sets")

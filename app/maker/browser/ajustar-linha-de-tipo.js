@@ -1,9 +1,7 @@
-// A caixa da linha de tipo vai ate a borda direita da carta, passando por baixo
-// do simbolo de edicao. Como o campo e oneLine, o gerador encolhe a fonte ate
-// caber na LARGURA da caixa - e cabendo ali, ainda assim invade o simbolo. Em
-// ingles quase nao aparece; em portugues a linha e mais longa ("Criatura
-// Lendaria - Dinossauro Anciao") e a ultima palavra sai por baixo do simbolo.
-// Encurtar a caixa antes do simbolo faz o mesmo encolhimento resolver sozinho.
+// A caixa da linha de tipo vai ate a borda direita, por baixo do simbolo de
+// edicao. O campo e oneLine, entao a fonte encolhe ate caber na LARGURA - cabe,
+// e ainda invade o simbolo. Encurtar a caixa antes dele resolve pelo mesmo
+// encolhimento.
 () => {
     const tipo = card.text.type;
     if (!tipo || card.setSymbolX == null) { return; }

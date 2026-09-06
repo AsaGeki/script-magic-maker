@@ -1,15 +1,13 @@
 """Regera os PNG que já estão em output/, com os dados e correções de hoje.
 
-Serve pra quando uma correção muda o desenho de toda carta (fonte, moldura,
-layout de texto) e as imagens no disco ficaram com a versão antiga. Cada
-arquivo é reaberto pela edição e número que o nome carrega, a carta é
+Cada arquivo é reaberto pela edição e número que o nome carrega, a carta é
 reconsultada no Scryfall e o PNG é sobrescrito no lugar.
 
     uv run python scripts/regerar.py                    # tudo em output/
     uv run python scripts/regerar.py decks/vermelho     # só uma pasta
 
-As fichas passam pelo app.cards.fichas antes de gerar - é de lá que sai o nome
-e a linha de tipo em português delas, que não existem no Scryfall.
+As fichas passam pelo app.cards.fichas antes de gerar: é de lá que sai o nome e
+a linha de tipo em português delas.
 """
 
 import asyncio

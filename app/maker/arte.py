@@ -1,29 +1,19 @@
 """Escolha da arte que vai pra carta.
 
-O recorte do Scryfall (art_crop, 626x457) e pequeno demais pra uma carta
-gerada em 2010x2814, entao a arte primaria vem do MTGPics.
+O art_crop do Scryfall (626x457) e pequeno pra uma carta gerada em 2010x2814,
+entao a arte primaria vem do MTGPics. Tres coisas dele exigem cuidado:
 
-Tres armadilhas do MTGPics, as tres tratadas aqui:
+1. A ilustracao e indexada pela edicao onde saiu primeiro, nao pela
+   reimpressao: a URL montada com edicao/numero do Scryfall da 404 fora da
+   edicao original, e o caminho certo sai da pagina da carta.
+2. A numeracao nem sempre bate com a do Scryfall, entao um 200 pode ser a arte
+   de outra carta. Quem confirma e o <title> da pagina; quando o ref montado
+   erra, a busca por nome do site diz o certo.
+3. Parte do acervo e arte de divulgacao, com credito e logo estampados sobre a
+   ilustracao. Quem nao quiser gera com --sem-mtgpics e fica no art_crop.
 
-1. Ele indexa a ilustracao pela edicao onde ela saiu primeiro, nao pela
-   reimpressao. Montar a URL com a edicao/numero do Scryfall so acerta quando
-   a carta e da edicao original; em reimpressao da 404, e o caminho certo sai
-   da pagina da carta.
-2. A numeracao dele nem sempre bate com a do Scryfall - XLN 226 e Raging
-   Swordtooth num e Hostage Taker no outro -, entao um 200 pode ser a arte de
-   outra carta. Quem resolve isso e o <title> da pagina, que traz o nome em
-   ingles: so vale a pagina cujo titulo bate com o nome da carta, e quando o
-   ref montado erra, a busca por nome do proprio site diz o ref certo.
-3. Parte do acervo e a arte de divulgacao, com credito do artista, logo do
-   MAGIC ou linha de copyright estampados sobre a ilustracao. Isso sai na
-   carta gerada; quem nao quiser gera com --sem-mtgpics e fica no art_crop.
-
-Confirmada a pagina, a assinatura de imagem escolhe entre as varias artes que
-um mesmo nome pode ter - ela decide qual ilustracao, nao qual carta.
-
-O art_crop de reserva e o da impressao em INGLES: quando a Wizards nao publicou
-a arte localizada, o da impressao em portugues e uma imagem de aviso
-("Localized Image Not Available") no lugar da arte.
+O art_crop de reserva e o da impressao em INGLES: sem arte localizada, o da
+impressao em portugues e uma imagem de aviso no lugar da arte.
 """
 
 import base64
@@ -47,8 +37,8 @@ BASE_SCRYFALL = "https://api.scryfall.com"
 TIMEOUT = 25.0
 CABECALHOS = {"User-Agent": SCRYFALL_USER_AGENT}
 
-# Cada miniatura da pagina vem colada no id da ilustracao que a abre, e e por
-# esse id que se descobre o ilustrador (ver _ilustrador).
+# Cada miniatura vem colada no id da ilustracao, que e por onde se chega ao
+# ilustrador.
 _MINIATURA = re.compile(
     r"LoadIllus\('(\d+)'\).*?pics/art_th/([a-z0-9]+)/([0-9a-z_]+)\.jpg", re.DOTALL
 )
@@ -85,11 +75,9 @@ async def _melhor_do_mtgpics(
 ) -> bytes | None:
     """A arte do MTGPics que casa com a ilustracao desta impressao.
 
-    Duas conferencias decidem, as duas exatas: o titulo da pagina diz que e
-    esta carta e o ilustrador da ficha diz que e esta ilustracao. A segunda e
-    o que separa impressao de terreno basico, onde o nome sozinho nao
-    distingue nada. A assinatura de imagem so desempata entre artes do mesmo
-    ilustrador pra mesma carta.
+    O titulo da pagina confirma a carta e o ilustrador da ficha separa as
+    ilustracoes entre si - o que importa em terreno basico, onde o nome nao
+    distingue nada. A assinatura de imagem so desempata o que sobrar.
     """
     assinatura_alvo = _assinatura(referencia)
     if assinatura_alvo is None:
@@ -103,17 +91,15 @@ async def _melhor_do_mtgpics(
         return None
 
     miniaturas = _miniaturas(pagina)
-    # Confirmada a pagina, a miniatura numerada como a impressao e ela mesma -
-    # e o unico criterio exato quando a carta tem varias artes do mesmo
-    # ilustrador. Command Tower (REX) tem duas, e a assinatura de imagem as
-    # separava por dois pontos de distancia, escolhendo a errada.
+    # Confirmada a pagina, a miniatura numerada como a impressao e ela mesma: e
+    # o unico criterio exato quando a carta tem varias artes do mesmo
+    # ilustrador, onde a assinatura de imagem decide por margem minima.
     desta_impressao = (carta.set.lower(), carta.collector_number.zfill(3).lower())
     candidatas = []
     for ident, edicao, numero in miniaturas:
-        # Com uma ilustracao so na pagina nao ha o que separar, e o titulo ja
-        # confirmou a carta. Exigir o ilustrador ali dentro so faz perder arte
-        # por divergencia de grafia entre as duas fontes ("Sami Mikkonen" no
-        # MTGPics contra "Sami Makkonen" no Scryfall).
+        # Com uma ilustracao so nao ha o que separar, e o titulo ja confirmou a
+        # carta: exigir o ilustrador ali perde arte por divergencia de grafia
+        # entre as duas fontes.
         if len(miniaturas) > 1 and not await _e_do_ilustrador(client, ident, carta.artist):
             continue
         imagem = await _baixar_imagem(client, _url_da_arte(f"{edicao}/{numero}"))
@@ -131,9 +117,8 @@ async def _melhor_do_mtgpics(
             carta.artist,
         )
         return None
-    # A da propria impressao vem primeiro; sem ela, decide a menor distancia, e
-    # o empate vai pra imagem maior, que costuma ser a versao em resolucao
-    # maior da mesma arte.
+    # A da propria impressao vem primeiro; sem ela decide a menor distancia, e o
+    # empate vai pra imagem maior.
     return min(candidatas, key=lambda item: (item[0], item[1], -item[2]))[3]
 
 
@@ -144,10 +129,9 @@ def _url_da_arte(caminho: str) -> str:
 async def _pagina_da_carta(client: httpx.AsyncClient, carta: ScryfallCard) -> str | None:
     """O HTML da pagina do MTGPics que e mesmo desta carta, ou None.
 
-    O ref montado com a edicao e o numero do Scryfall acerta na maioria das
-    cartas, mas nao em todas, porque as duas fontes numeram diferente. Quando
-    o titulo da pagina desmente o ref, a busca por nome do site diz o ref
-    certo; se nem ela confirmar, o chamador fica no art_crop.
+    O ref montado com edicao e numero do Scryfall acerta na maioria, mas as
+    duas fontes numeram diferente. Quando o titulo desmente o ref, a busca por
+    nome do site diz o certo; sem confirmacao, o chamador fica no art_crop.
     """
     montado = f"{carta.set}{carta.collector_number.zfill(3)}"
     pagina = await _pagina_do_ref(client, montado)
@@ -197,13 +181,10 @@ async def _ref_por_nome(client: httpx.AsyncClient, nome: str) -> str | None:
 def _e_a_carta(pagina: str, carta: ScryfallCard) -> bool:
     """Se o titulo da pagina nomeia esta carta.
 
-    O titulo vem com entidade HTML - "Chandra&#039;s Spitfire" -, entao passa
-    pelo unescape antes da comparacao; sem isso toda carta com apostrofo no
-    nome era recusada e caia no art_crop.
-
-    A face da frente entra sozinha porque o MTGPics titula carta de duas faces
-    so pela primeira - e quando ele titula as duas, separa por barra simples
-    ("Command Tower/Command Tower"), nao pelas duas do Scryfall.
+    O titulo vem com entidade HTML ("Chandra&#039;s Spitfire"), por isso o
+    unescape. Carta de duas faces as vezes e titulada so pela primeira, as
+    vezes pelas duas com barra simples ("Command Tower/Command Tower") - as
+    duas formas contam.
     """
     achado = _TITULO.search(pagina)
     if achado is None:
@@ -222,8 +203,8 @@ def _miniaturas(pagina: str) -> list[tuple[str, str, str]]:
 async def _e_do_ilustrador(client: httpx.AsyncClient, ident: str, artista: str | None) -> bool:
     """Se a ilustracao e de quem o Scryfall credita nesta impressao.
 
-    Carta de varios artistas vem creditada junta no Scryfall ("A & B") e
-    separada no MTGPics, por isso basta um nome cair dentro do outro.
+    Carta de varios artistas vem junta no Scryfall ("A & B") e separada no
+    MTGPics, por isso basta um nome cair dentro do outro.
     """
     if not artista:
         return False
@@ -245,9 +226,8 @@ async def _art_crop_em_ingles(
 ) -> bytes | None:
     """O art_crop da impressao em ingles - serve de reserva e de gabarito.
 
-    Carta que ja veio em ingles usa o art_crop que a consulta trouxe; pra
-    impressao em portugues vale uma requisicao a mais, porque o art_crop em
-    portugues pode ser a imagem de aviso em vez da arte.
+    Impressao em portugues paga uma requisicao a mais porque o art_crop dela
+    pode ser a imagem de aviso em vez da arte.
     """
     url = carta.art_crop
     if carta.lang != "en":
@@ -299,8 +279,7 @@ def _assinatura(imagem: bytes) -> int | None:
     """dHash de 64 bits do quadrado central da imagem.
 
     O quadrado central existe porque as duas fontes recortam a mesma
-    ilustracao em proporcoes diferentes (o Scryfall em 626x457, o MTGPics as
-    vezes em 16:9 de papel de parede); comparar a area comum e o que mantem a
+    ilustracao em proporcoes diferentes: comparar a area comum e o que mantem a
     mesma arte perto e arte diferente longe.
     """
     try:
