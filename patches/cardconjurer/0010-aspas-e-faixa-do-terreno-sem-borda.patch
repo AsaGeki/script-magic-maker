@@ -1,0 +1,94 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+index b4f2a26..1cae107 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -1567,9 +1567,26 @@ async function autoTextlessBasics2022Frame(colors, mana_cost, type_line, power,
+ 		{
+ 			'name': frameNames[letter] + (snow ? ' Snow' : '') + ' Frame',
+ 			'src': '/img/frames/textless/2022/' + (snow ? 'snow/' : '') + frameFiles[letter] + '.png',
+-			'masks': soAFaixa ? [{src: '/img/frames/textless/2022/maskType.png', name: 'Type'}] : []
++			'masks': soAFaixa ? [{src: '/img/frames/textless/2022/maskType.png', name: 'Type'}] : [],
++			// A faixa do pacote e clara; a da carta sem borda e escura, com o nome
++			// em branco. Escurecer a camada inteira e o que da pra fazer com o que
++			// o catalogo tem - nao ha mascara so do miolo da faixa.
++			'hslLightness': soAFaixa ? -70 : 0
+ 		}
+ 	];
++	// Na carta sem borda a arte para acima do rodape e o resto e preto. Vai
++	// no fim da lista pra ser desenhada por baixo da faixa do nome.
++	if (soAFaixa) {
++		frames.push({
++			'name': 'Bottom Bar',
++			'src': '/img/black.png',
++			'masks': [],
++			'bounds': {x: 0, y: 0.9269, width: 1, height: 0.0731}
++		});
++	}
++	// O simbolo de colecao sai escuro sobre a faixa escura; a carta impressa
++	// usa a versao branca (ver o desenho em drawCard).
++	card.setSymbolClaro = soAFaixa;
+ 
+ 	card.frames = frames;
+ 	card.frames.reverse();
+@@ -4460,7 +4477,19 @@ function widthToAngle(width, radius) {
+ 	return width / radius;
+ }
+ function curlyQuotes(input) {
+-	return input.replace(/ '/g, ' ‘').replace(/^'/, '‘').replace(/'/g, '’').replace(/ "/g, ' “').replace(/" /g, '” ').replace(/\."/, '.”').replace(/"$/, '”').replace(/"\)/g, '”)').replace(/"/g, '“');
++	return input
++		.replace(/ '/g, ' ‘').replace(/^'/, '‘').replace(/'/g, '’')
++		.replace(/ "/g, ' “')
++		.replace(/" /g, '” ')
++		.replace(/\."/, '.”')
++		.replace(/"$/, '”')
++		.replace(/"\)/g, '”)')
++		/* script-magic-maker: aspas-de-fechamento-antes-da-pontuacao */
++		// As regras acima fecham aspas na convencao inglesa, com a pontuacao
++		// DENTRO (...virado."). Em portugues ela fica fora (...virado".), e sem
++		// esta linha a aspa caia no catch-all e saia como aspa de abertura.
++		.replace(/"([.,;:!?\n])/g, '”$1')
++		.replace(/"/g, '“');
+ }
+ function pinlineColors(color) {
+ 	return color.replace('white', '#fcfeff').replace('blue', '#0075be').replace('black', '#272624').replace('red', '#ef3827').replace('green', '#007b43')
+@@ -5003,7 +5032,24 @@ function drawCard() {
+ 	// text
+ 	cardContext.drawImage(textCanvas, 0, 0, cardCanvas.width, cardCanvas.height);
+ 	// set symbol
+-	cardContext.drawImage(setSymbol, scaleX(card.setSymbolX), scaleY(card.setSymbolY), setSymbol.width * card.setSymbolZoom, setSymbol.height * card.setSymbolZoom)
++	/* script-magic-maker: simbolo-de-colecao-claro */
++	// Em moldura de faixa escura o simbolo preto some no fundo. Repintar de
++	// branco pela silhueta e o que a carta impressa mostra.
++	var simboloLargura = setSymbol.width * card.setSymbolZoom;
++	var simboloAltura = setSymbol.height * card.setSymbolZoom;
++	if (card.setSymbolClaro && simboloLargura > 0 && simboloAltura > 0) {
++		var claro = document.createElement('canvas');
++		claro.width = Math.ceil(simboloLargura);
++		claro.height = Math.ceil(simboloAltura);
++		var claroContexto = claro.getContext('2d');
++		claroContexto.drawImage(setSymbol, 0, 0, simboloLargura, simboloAltura);
++		claroContexto.globalCompositeOperation = 'source-in';
++		claroContexto.fillStyle = 'white';
++		claroContexto.fillRect(0, 0, claro.width, claro.height);
++		cardContext.drawImage(claro, scaleX(card.setSymbolX), scaleY(card.setSymbolY), simboloLargura, simboloAltura);
++	} else {
++		cardContext.drawImage(setSymbol, scaleX(card.setSymbolX), scaleY(card.setSymbolY), simboloLargura, simboloAltura);
++	}
+ 	// serial
+ 	if (card.serialNumber || card.serialTotal) {
+ 		var x = parseInt(card.serialX) || 172;
+diff --git a/js/frames/packTextlessBasicsBorderless.js b/js/frames/packTextlessBasicsBorderless.js
+index 047b7ba..d43d1f1 100644
+--- a/js/frames/packTextlessBasicsBorderless.js
++++ b/js/frames/packTextlessBasicsBorderless.js
+@@ -42,7 +42,9 @@ document.querySelector('#loadFrameVersion').onclick = async function() {
+ 	//text
+ 	loadTextOptions({
+ 		mana: {name:'Mana Cost', text:'', y:0.0613, width:0.9292, height:71/2100, oneLine:true, size:71/1638, align:'right', shadowX:-0.001, shadowY:0.0029, manaCost:true, manaSpacing:0},
+-		title: {name:'Title', text:'', x:283/1500, y:0.8481, width:0.6626, height:0.0543, oneLine:true, font:'belerenb', size:0.0381, align:'center'}
++		// Nome em branco: a faixa desta moldura e escura (ver a camada com
++		// hslLightness em autoTextlessBasics2022Frame).
++		title: {name:'Title', text:'', x:283/1500, y:0.8481, width:0.6626, height:0.0543, oneLine:true, font:'belerenb', size:0.0381, align:'center', color:'white'}
+ 	});
+ }
+ //loads available frames
