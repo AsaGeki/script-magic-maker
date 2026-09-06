@@ -23,7 +23,7 @@ import re
 from io import BytesIO
 
 import httpx
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageChops, UnidentifiedImageError
 
 from app.cards.models import ScryfallCard
 from app.config import SCRYFALL_USER_AGENT
@@ -63,6 +63,8 @@ async def buscar(carta: ScryfallCard) -> str | None:
             return None
 
         arte = await _melhor_do_mtgpics(client, carta, referencia)
+        if arte is not None:
+            arte = _sem_carimbo(arte)
         # O MTGPics costuma ter a arte maior, mas nao sempre - em algumas
         # edicoes recentes o que ele guarda e menor que o recorte do Scryfall.
         if arte is None or _pixels(arte) <= _pixels(referencia):
@@ -264,6 +266,57 @@ async def _baixar_imagem(client: httpx.AsyncClient, url: str) -> bytes | None:
     if not resposta.headers.get("content-type", "").startswith("image/"):
         return None
     return resposta.content
+
+
+# Parte do acervo do MTGPics e arte de divulgacao, com o logo da Magic, a linha
+# de copyright ou o nome do artista impressos numa faixa no rodape (ver o
+# cabecalho deste modulo). O texto rende mais borda vertical que pintura, e e
+# esse pico no rodape que denuncia o carimbo.
+#
+# O pico diz SE ha carimbo, nao onde ele comeca: sobre a arte o texto rende so
+# 1,3 a 2 vezes a mediana, e a faixa nao tem contorno limpo pra seguir. Por isso
+# a faixa descartada e fixa, dimensionada pelo maior carimbo visto.
+#
+# O limiar erra dos dois lados - carimbo discreto passa, arte com detalhe fino
+# no rodape e cortada a toa -, mas cortar a toa custa pouco: a arte do MTGPics e
+# mais aberta que o recorte que aparece na carta.
+LARGURA_DO_PERFIL = 512
+LIMIAR_DE_CARIMBO = 1.7
+FRACAO_DO_CARIMBO = 0.15
+
+
+def _perfil_de_bordas(imagem: Image.Image) -> list[float]:
+    """Bordas verticais somadas por linha, com a imagem normalizada na largura."""
+    cinza = imagem.convert("L")
+    cinza = cinza.resize((LARGURA_DO_PERFIL, int(LARGURA_DO_PERFIL * cinza.height / cinza.width)))
+    bordas = ImageChops.difference(cinza, ImageChops.offset(cinza, 1, 0))
+    dados = list(bordas.getdata())
+    return [
+        sum(dados[y * LARGURA_DO_PERFIL : (y + 1) * LARGURA_DO_PERFIL]) / LARGURA_DO_PERFIL
+        for y in range(bordas.height)
+    ]
+
+
+def _sem_carimbo(imagem: bytes) -> bytes:
+    """A mesma arte sem a faixa de rodape, quando ela parece um carimbo."""
+    try:
+        aberta = Image.open(BytesIO(imagem))
+        aberta.load()
+    except (UnidentifiedImageError, OSError):
+        return imagem
+
+    perfil = _perfil_de_bordas(aberta)
+    altura = len(perfil)
+    normal = sorted(perfil)[altura // 2] or 1.0
+    faixa = perfil[int(altura * (1 - FRACAO_DO_CARIMBO)) :]
+    if max(faixa, default=0) < normal * LIMIAR_DE_CARIMBO:
+        return imagem
+
+    sobra = int(aberta.height * (1 - FRACAO_DO_CARIMBO))
+    cortada = aberta.convert("RGB").crop((0, 0, aberta.width, sobra))
+    saida = BytesIO()
+    cortada.save(saida, format="JPEG", quality=92)
+    return saida.getvalue()
 
 
 def _pixels(imagem: bytes) -> int:
