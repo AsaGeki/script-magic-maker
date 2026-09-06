@@ -55,6 +55,7 @@ MOLDURAS = {
     "Vanguarda": "Vanguard",
     "Aventura": "Adventure",
     "Virada": "Flip",
+    "Dividida": "Split",
 }
 
 # Layout cuja moldura propria o autoFrame ja alcanca.
@@ -65,6 +66,7 @@ MOLDURA_DO_LAYOUT = {
     Layout.VANGUARD: "Vanguarda",
     Layout.ADVENTURE: "Aventura",
     Layout.FLIP: "Virada",
+    Layout.SPLIT: "Dividida",
 }
 MOLDURA_PADRAO = "M15Regular-1"
 
@@ -151,7 +153,7 @@ LAYOUTS_DE_DUAS_FACES = frozenset(
 # A moldura normal so tem lugar pra uma delas, entao a outra sumiria: melhor
 # recusar. Layout que so muda o desenho (saga, classe, plano...) passa, com o
 # texto todo na caixa de regras.
-LAYOUTS_QUE_PERDEM_TEXTO = frozenset({Layout.SPLIT})
+LAYOUTS_QUE_PERDEM_TEXTO: frozenset[Layout] = frozenset()
 
 _IMPRESSAO_DIGITAL = carregar("impressao-digital")
 
@@ -248,6 +250,29 @@ def _custo_de_cor(carta: ScryfallCard) -> str:
     if da_frente:
         return da_frente
     return "".join(f"{{{cor}}}" for cor in carta.colors or [])
+
+
+def _nome_da_metade(face, indice: int) -> str:
+    """O nome so desta metade da carta dividida.
+
+    O Scryfall repete o nome combinado nas DUAS faces da carta dividida
+    ("Barulho // Confusao" em cada uma), entao o printed_name sozinho nao
+    serve.
+    """
+    partes = face.nome_exibido.split(" // ")
+    return partes[indice] if len(partes) > indice else face.nome_exibido
+
+
+def _cores_da_outra_metade(carta: ScryfallCard) -> list[str] | None:
+    """As cores da segunda metade, pra moldura que pinta as duas separado.
+
+    So a carta dividida usa: cada metade tem custo proprio e cor propria, e o
+    autoFrame so enxerga uma de cada vez.
+    """
+    if carta.layout != Layout.SPLIT or not carta.card_faces:
+        return None
+    custo = carta.card_faces[1].mana_cost or ""
+    return sorted({letra for letra in "WUBRG" if f"{{{letra}}}" in custo})
 
 
 def _letra_da_raridade(carta: ScryfallCard) -> str | None:
@@ -530,6 +555,32 @@ async def _aplicar_classe(page: Page, carta: ScryfallCard) -> None:
     await _esperar_desenho(page)
 
 
+_APLICAR_DIVIDIDA = carregar("aplicar-dividida")
+
+
+async def _aplicar_dividida(page: Page, carta: ScryfallCard) -> None:
+    """Depois da moldura: o import do gerador para na primeira metade, e na
+    moldura dividida ate os campos dela mudam de nome (ver aplicar-dividida.js)."""
+    if carta.layout != Layout.SPLIT or not carta.card_faces:
+        return
+    # A metade de cima da carta em pe e a SEGUNDA face, como a impressa mostra.
+    de_cima, de_baixo = carta.card_faces[1], carta.card_faces[0]
+    await page.evaluate(
+        _APLICAR_DIVIDIDA,
+        {
+            "nome": _nome_da_metade(de_cima, 1),
+            "tipo": de_cima.tipo_exibido or "",
+            "custo": de_cima.mana_cost or "",
+            "regras": de_cima.texto_exibido or "",
+            "nome2": _nome_da_metade(de_baixo, 0),
+            "tipo2": de_baixo.tipo_exibido or "",
+            "custo2": de_baixo.mana_cost or "",
+            "regras2": de_baixo.texto_exibido or "",
+        },
+    )
+    await _esperar_desenho(page)
+
+
 _APLICAR_VIRADA = carregar("aplicar-virada")
 
 
@@ -638,6 +689,7 @@ async def _aplicar_moldura(page: Page, carta: ScryfallCard) -> None:
             "tipoIngles": carta.type_line or "",
             "regrasIngles": carta.oracle_text or "",
             "custoDeCor": _custo_de_cor(carta),
+            "coresDaOutraMetade": _cores_da_outra_metade(carta),
         },
     )
     await _esperar_desenho(page)
@@ -788,6 +840,7 @@ async def _preencher(
         await _aplicar_vanguarda(page, carta)
         await _aplicar_aventura(page, carta)
         await _aplicar_virada(page, carta)
+        await _aplicar_dividida(page, carta)
         await _aplicar_selo(page, carta)
         await _aplicar_marca_dagua(page, carta, moldura)
         await _aplicar_nome_traduzido(page, carta, preferir_arena=usar_arena)

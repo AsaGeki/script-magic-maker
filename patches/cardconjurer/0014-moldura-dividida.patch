@@ -1,0 +1,93 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+index 58d4380..b6560ed 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -911,6 +911,10 @@ function autoFrame() {
+ 	} else if (frame == 'Flip') {
+ 		group = 'Standard-3';
+ 		autoFlipFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '');
++	/* script-magic-maker: moldura-dividida */
++	} else if (frame == 'Split') {
++		group = 'Standard-3';
++		autoSplitFrame(colors, card.text.mana.text, card.text.type.text, '');
+ 	}
+ 
+ 	if (autoFramePack != frame) {
+@@ -918,6 +922,64 @@ function autoFrame() {
+ 		autoFramePack = frame;
+ 	}
+ }
++/* script-magic-maker: moldura-dividida */
++// packSplit.js so e alcancavel pelo seletor manual de pacote. A carta e lida
++// deitada e tem duas metades completas, cada uma com nome, custo, tipo e
++// regras; o texto sai girado -90 graus.
++//
++// A cor de cada metade sai do custo dela, nao do custo somado: card.coresDaOutra
++// traz as letras da segunda, emprestadas por aplicar-moldura.js.
++function makeSplitFrameByLetter(letter, metade) {
++	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'A': 'Artifact', 'L': 'Land'};
++	letter = letter.toUpperCase();
++	return {
++		name: frameNames[letter] + ' Frame',
++		src: '/img/frames/m15/split/' + letter.toLowerCase() + '.png',
++		masks: [{src: '/img/frames/m15/split/' + metade + '.svg', name: metade == 'top' ? 'Top Half' : 'Bottom Half'}]
++	};
++}
++function letraDaMetade(colors) {
++	if (colors.length > 1) {
++		return 'M';
++	}
++	return colors.length == 1 ? colors[0].toUpperCase() : 'A';
++}
++async function autoSplitFrame(colors, mana_cost, type_line, power) {
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	await resetCardIrregularities({resetOthers: false});
++	card.version = 'split';
++	// O pacote so tem uma janela de arte, e a carta impressa tem duas. Cobrir
++	// a carta inteira faz a mesma arte aparecer nas duas, em vez de deixar a
++	// segunda como um buraco preto.
++	card.artBounds = {x: 0, y: 0, width: 1, height: 1};
++	autoFitArt();
++	card.setSymbolBounds = {x: 2, y: 2, width: 0.12, height: 0.0410, vertical: 'center', horizontal: 'right'};
++	resetSetSymbol();
++	card.watermarkBounds = {x: 0.5, y: 0.7762, width: 0.75, height: 0.2305};
++	resetWatermark();
++	loadTextOptions({
++		mana: {name: 'Mana Cost (Right)', text: '', x: 0.0847, y: 0.4381, width: 0.5367, height: 71/2100, oneLine: true, size: 71/1638, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0, rotation: -90},
++		title: {name: 'Title (Right)', text: '', x: 0.072, y: 0.4381, width: 0.5367, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0381, rotation: -90},
++		type: {name: 'Type (Right)', text: '', x: 0.55, y: 0.4381, width: 0.5367, height: 0.0286, oneLine: true, font: 'belerenb', size: 0.0286, rotation: -90},
++		rules: {name: 'Rules Text (Right)', text: '', x: 0.6087, y: 0.4334, width: 0.5174, height: 0.2443, size: 0.0362, rotation: -90},
++		mana2: {name: 'Mana Cost (Left)', text: '', x: 0.0847, y: 0.8943, width: 0.5367, height: 71/2100, oneLine: true, size: 71/1638, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0, rotation: -90},
++		title2: {name: 'Title (Left)', text: '', x: 0.072, y: 0.8943, width: 0.5367, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0381, rotation: -90},
++		type2: {name: 'Type (Left)', text: '', x: 0.55, y: 0.8943, width: 0.5367, height: 0.0286, oneLine: true, font: 'belerenb', size: 0.0286, rotation: -90},
++		rules2: {name: 'Rules Text (Left)', text: '', x: 0.6087, y: 0.8896, width: 0.5174, height: 0.2443, size: 0.0362, rotation: -90}
++	});
++
++	var frames = [
++		makeSplitFrameByLetter(letraDaMetade(colors), 'top'),
++		makeSplitFrameByLetter(letraDaMetade(card.coresDaOutra || colors), 'bottom')
++	];
++
++	card.frames = frames;
++	card.frames.reverse();
++	await card.frames.forEach(item => addFrame([], item));
++	card.frames.reverse();
++}
+ /* script-magic-maker: moldura-de-carta-virada */
+ // packFlip.js so e alcancavel pelo seletor manual de pacote. A carta tem duas
+ // metades: a de cima normal e a de baixo girada 180 graus, cada uma com nome,
+diff --git a/creator/index.html b/creator/index.html
+index 4d3ec06..abbca82 100644
+--- a/creator/index.html
++++ b/creator/index.html
+@@ -737,6 +737,8 @@
+ 							<option value="Adventure">Adventure</option>
+ 							<!-- script-magic-maker: moldura-de-carta-virada -->
+ 							<option value="Flip">Flip</option>
++							<!-- script-magic-maker: moldura-dividida -->
++							<option value="Split">Split</option>
+ 							<option value="UBNew">Universes Beyond (Accurate)</option>
+ 
+ 							<option disabled>Custom frames</option>

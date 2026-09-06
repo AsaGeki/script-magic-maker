@@ -44,8 +44,8 @@
 1x Your Plans Mean Nothing (DSC) 367
 1x Ashnod (PVAN) 401
 
-# Layout que reparte a carta em duas metades: hoje o gerador recusa, e a linha
-# fica aqui pra cobrar a implementacao.
+# Layout que reparte a carta em duas metades, cada uma com nome, custo e texto
+# proprios.
 1x Fuss // Bother (MKM) 248
 1x Ondu Knotmaster (MH3) 196
 1x Bushi Tenderfoot (CHK) 2
