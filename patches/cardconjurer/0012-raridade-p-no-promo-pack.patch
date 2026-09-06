@@ -1,0 +1,18 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+index 5488ea9..6a9c2d6 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -5481,6 +5481,13 @@ function changeCardIndex() {
+ 				if (setObject.set_type == 'token' && setObject.parent_set_code) {
+ 					document.querySelector('#info-set').value = setObject.parent_set_code.toUpperCase();
+ 				}
++				/* script-magic-maker: raridade-p-no-promo-pack */
++				// Promo pack numerado dentro da colecao principal imprime "P" no lugar
++				// da raridade (MID 388, KHM 404, SNC 464, todas de raridade diferente).
++				// O que sai em colecao propria de promo mantem a raridade de verdade.
++				if ((cardToImport.promo_types || []).includes('promopack') && setObject.set_type != 'promo') {
++					document.querySelector('#info-rarity').value = 'P';
++				}
+ 				if (document.querySelector('#enableNewCollectorStyle').checked) {
+ 					var number = document.querySelector('#info-number').value;
+ 
