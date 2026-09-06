@@ -78,10 +78,6 @@ def moldura_sugerida(carta: ScryfallCard) -> str:
         return MOLDURAS["Full art (fiel)"]
     if "extendedart" in efeitos:
         return MOLDURAS["Arte estendida"]
-    # O showcase "inverted" sangra a arte ate a borda e nao existe no catalogo
-    # do Card Conjurer; a borderless e a que mais se aproxima.
-    if "inverted" in efeitos:
-        return MOLDURAS["Borderless"]
     # Depois das de acabamento: impressao de Universes Beyond que tambem e
     # borderless ou de arte estendida usa a moldura do acabamento.
     if "universesbeyond" in (carta.promo_types or []):
