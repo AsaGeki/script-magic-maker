@@ -226,13 +226,20 @@ def _rodape_de_quatro_digitos(carta: ScryfallCard) -> bool:
     )
 
 
-def _e_terreno_comum(carta: ScryfallCard) -> bool:
-    """Se o rodape leva "L" no lugar da inicial da raridade.
+def _letra_da_raridade(carta: ScryfallCard) -> str | None:
+    """A letra que o rodape leva no lugar da inicial da raridade, ou None.
 
-    Terreno comum e o unico caso: MH3 308, LCI 397, REX 26 e OTJ 260 saem com
-    "L" onde o Scryfall diz common. Incomum, rara e mitica seguem a inicial.
+    O Scryfall chama tudo isso de `common`, mas a carta impressa distingue:
+    ficha sai com "T" (TOTP 5), emblema com "E" (TSOS 13) e terreno comum com
+    "L" (MH3 308, LCI 397, REX 26). Incomum, rara e mitica seguem a inicial.
     """
-    return carta.rarity == Rarity.COMMON and "land" in (carta.type_line or "").lower()
+    if carta.layout in (Layout.TOKEN, Layout.DOUBLE_FACED_TOKEN):
+        return "T"
+    if carta.layout == Layout.EMBLEM:
+        return "E"
+    if carta.rarity == Rarity.COMMON and "land" in (carta.type_line or "").lower():
+        return "L"
+    return None
 
 
 def _e_planeswalker(carta: ScryfallCard) -> bool:
@@ -510,13 +517,15 @@ async def _aplicar_selo(page: Page, carta: ScryfallCard) -> None:
 
 async def _aplicar_raridade(page: Page, carta: ScryfallCard) -> None:
     """Depois do import: e ele que preenche o campo com a inicial do Scryfall."""
-    if not _e_terreno_comum(carta):
+    letra = _letra_da_raridade(carta)
+    if letra is None:
         return
     await page.evaluate(
-        """() => {
-            document.querySelector('#info-rarity').value = 'L';
+        """(letra) => {
+            document.querySelector('#info-rarity').value = letra;
             return bottomInfoEdited();
-        }"""
+        }""",
+        letra,
     )
 
 
