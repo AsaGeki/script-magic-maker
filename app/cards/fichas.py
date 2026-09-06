@@ -68,7 +68,11 @@ async def descobrir(cartas: list[ScryfallCard]) -> list[FichaDoDeck]:
     """
     achadas: dict[str, FichaDoDeck] = {}
 
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers=CABECALHOS) as client:
+    # Com base_url: as buscas de regra reusam o _buscar do app.cards.service,
+    # que monta o caminho relativo.
+    async with httpx.AsyncClient(
+        base_url=BASE_SCRYFALL, timeout=TIMEOUT, headers=CABECALHOS
+    ) as client:
         for carta in cartas:
             for parte in await _partes_de_ficha(client, carta):
                 nome = parte.get("name") or ""
@@ -113,11 +117,12 @@ async def _montar_ficha(
     ficha.printed_type_line = await _linha_de_tipo_em_portugues(client, ficha, criadora)
 
     nome = ficha.arena.nome if ficha.arena else None
-    regra = (
+    # So o que sai de dentro de um lembrete precisa virar frase; a linha solta
+    # ja e uma ("Voar", que na carta impressa nem leva ponto).
+    regra = _como_texto_da_ficha(
         _regra_em_portugues(criadora, ficha)
         or await _regra_de_outra_criadora(client, ficha)
-        or await _linha_solta_em_portugues(client, ficha)
-    )
+    ) or await _linha_solta_em_portugues(client, ficha)
     if nome or regra:
         # Pelo caminho que o gerador ja usa pra texto nao impresso.
         ficha.arena = TraducaoArena(
@@ -318,6 +323,27 @@ def _ability_entre_aspas(texto: str | None) -> str | None:
         if entre_aspas:
             return _sem_ponto_final(entre_aspas.group(1))
     return None
+
+
+def _como_texto_da_ficha(regra: str | None) -> str | None:
+    """A habilidade extraida do lembrete vira o texto da ficha.
+
+    Dentro do lembrete ela e um trecho de frase: vem sem o ponto final e, em
+    portugues, com o verbo em minuscula ("...com "{2}, {T}, sacrifique este
+    artefato: ..."" na Bake into a Pie). Sozinha na ficha ela e a frase.
+    """
+    if not regra:
+        return regra
+    dentro_de_simbolo = False
+    for indice, letra in enumerate(regra):
+        if letra == "{":
+            dentro_de_simbolo = True
+        elif letra == "}":
+            dentro_de_simbolo = False
+        elif not dentro_de_simbolo and letra.isalpha():
+            regra = regra[:indice] + letra.upper() + regra[indice + 1 :]
+            break
+    return regra if regra.endswith(".") else f"{regra}."
 
 
 def _sem_ponto_final(texto: str | None) -> str | None:
