@@ -1,5 +1,5 @@
 diff --git a/js/creator-23.js b/js/creator-23.js
-index 58d4380..b6560ed 100644
+index 58d4380..c9e5198 100644
 --- a/js/creator-23.js
 +++ b/js/creator-23.js
 @@ -911,6 +911,10 @@ function autoFrame() {
@@ -13,7 +13,7 @@ index 58d4380..b6560ed 100644
  	}
  
  	if (autoFramePack != frame) {
-@@ -918,6 +922,64 @@ function autoFrame() {
+@@ -918,6 +922,83 @@ function autoFrame() {
  		autoFramePack = frame;
  	}
  }
@@ -22,24 +22,44 @@ index 58d4380..b6560ed 100644
 +// deitada e tem duas metades completas, cada uma com nome, custo, tipo e
 +// regras; o texto sai girado -90 graus.
 +//
-+// A cor de cada metade sai do custo dela, nao do custo somado: card.coresDaOutra
-+// traz as letras da segunda, emprestadas por aplicar-moldura.js.
-+function makeSplitFrameByLetter(letter, metade) {
++// A cor de cada metade sai do custo dela, nao do custo somado:
++// card.custosDasMetades traz os dois, emprestados por aplicar-moldura.js.
++function makeSplitFrameByLetter(letter, metade, soADireita) {
 +	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'A': 'Artifact', 'L': 'Land'};
 +	letter = letter.toUpperCase();
++	var masks = [{src: '/img/frames/m15/split/' + metade + '.svg', name: metade == 'top' ? 'Top Half' : 'Bottom Half'}];
++	// Mascara sobre mascara se cruza: com as duas sobra so o quarto da carta.
++	if (soADireita) {
++		masks.push({src: '/img/frames/maskRightHalf.png', name: 'Right Half'});
++	}
 +	return {
 +		name: frameNames[letter] + ' Frame',
 +		src: '/img/frames/m15/split/' + letter.toLowerCase() + '.png',
-+		masks: [{src: '/img/frames/m15/split/' + metade + '.svg', name: metade == 'top' ? 'Top Half' : 'Bottom Half'}]
++		masks: masks
 +	};
 +}
-+function letraDaMetade(colors) {
-+	if (colors.length > 1) {
-+		return 'M';
++// Cada metade tem custo proprio, entao cor propria. Metade hibrida sai em duas
++// cores como o autoM15Frame faz: a segunda so na parte direita.
++//
++// Na carta impressa esse degrade e DIAGONAL - a metade e lida girada, entao a
++// segunda cor cobre o topo e a direita e desbota pra base esquerda. O catalogo
++// nao tem mascara pra isso: as unicas horizontais cortam no meio da carta, que
++// e justamente a divisa entre as duas metades. O corte reto acerta 4 dos 6
++// pontos de borda medidos; o inverso acerta 3.
++function molduraDaMetade(custo, metade, frames) {
++	var cores = [...new Set((custo.toUpperCase().match(/[WUBRG]/g) || []))];
++	if (cores.length == 2 && custo.includes('/')) {
++		frames.push(makeSplitFrameByLetter(cores[1], metade, true));
++		frames.push(makeSplitFrameByLetter(cores[0], metade, false));
++		return;
 +	}
-+	return colors.length == 1 ? colors[0].toUpperCase() : 'A';
++	var letra = cores.length > 1 ? 'M' : (cores.length == 1 ? cores[0] : 'A');
++	frames.push(makeSplitFrameByLetter(letra, metade, false));
 +}
 +async function autoSplitFrame(colors, mana_cost, type_line, power) {
++	// Lido antes do primeiro await: quem empresta os custos os devolve assim que
++	// autoFrame() retorna, e daqui pra frente eles ja nao estao mais em card.
++	var custos = card.custosDasMetades || [mana_cost, mana_cost];
 +	card.frames = [];
 +	document.querySelector('#frame-list').innerHTML = null;
 +
@@ -65,10 +85,9 @@ index 58d4380..b6560ed 100644
 +		rules2: {name: 'Rules Text (Left)', text: '', x: 0.6087, y: 0.8896, width: 0.5174, height: 0.2443, size: 0.0362, rotation: -90}
 +	});
 +
-+	var frames = [
-+		makeSplitFrameByLetter(letraDaMetade(colors), 'top'),
-+		makeSplitFrameByLetter(letraDaMetade(card.coresDaOutra || colors), 'bottom')
-+	];
++	var frames = [];
++	molduraDaMetade(custos[0], 'top', frames);
++	molduraDaMetade(custos[1], 'bottom', frames);
 +
 +	card.frames = frames;
 +	card.frames.reverse();

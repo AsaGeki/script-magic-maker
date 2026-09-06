@@ -28,11 +28,11 @@
     const devolverTipo = emprestar('type', args.tipoIngles);
     const devolverRegras = emprestar('rules', args.regrasIngles);
     const devolverCusto = emprestar('mana', args.custoDeCor);
-    // A moldura dividida precisa da cor das DUAS metades, e so a da frente cabe
-    // no campo de custo.
-    card.coresDaOutra = args.coresDaOutraMetade;
+    // A moldura dividida precisa do custo das DUAS metades, e so um cabe no
+    // campo de custo.
+    card.custosDasMetades = args.custosDasMetades;
     autoFrame();
-    delete card.coresDaOutra;
+    delete card.custosDasMetades;
     devolverCusto();
     devolverRegras();
     devolverTipo();

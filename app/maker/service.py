@@ -263,16 +263,15 @@ def _nome_da_metade(face, indice: int) -> str:
     return partes[indice] if len(partes) > indice else face.nome_exibido
 
 
-def _cores_da_outra_metade(carta: ScryfallCard) -> list[str] | None:
-    """As cores da segunda metade, pra moldura que pinta as duas separado.
+def _custos_das_metades(carta: ScryfallCard) -> list[str] | None:
+    """O custo de cada metade da carta dividida, de cima pra baixo.
 
-    So a carta dividida usa: cada metade tem custo proprio e cor propria, e o
-    autoFrame so enxerga uma de cada vez.
+    Cada metade tem cor propria, e o autoFrame so enxerga um custo de cada vez.
+    A de cima e a SEGUNDA face, como a carta impressa mostra.
     """
     if carta.layout != Layout.SPLIT or not carta.card_faces:
         return None
-    custo = carta.card_faces[1].mana_cost or ""
-    return sorted({letra for letra in "WUBRG" if f"{{{letra}}}" in custo})
+    return [carta.card_faces[1].mana_cost or "", carta.card_faces[0].mana_cost or ""]
 
 
 def _letra_da_raridade(carta: ScryfallCard) -> str | None:
@@ -459,7 +458,12 @@ async def _aplicar_arte(page: Page, carta: ScryfallCard) -> bool:
 
     Quem escolhe e confere e o app.maker.arte; aqui a imagem so e entregue.
     """
-    data_url = await arte.buscar(carta, await _aspecto_da_janela_de_arte(page))
+    # A carta dividida tem duas janelas de arte e o gerador so tem uma fonte:
+    # a montagem ja vem com as duas no lugar (ver arte.dividida).
+    if carta.layout == Layout.SPLIT:
+        data_url = await arte.dividida(carta)
+    else:
+        data_url = await arte.buscar(carta, await _aspecto_da_janela_de_arte(page))
     if data_url is None:
         return False
     await page.evaluate("(src) => uploadArt(src, 'autoFit')", data_url)
@@ -689,7 +693,7 @@ async def _aplicar_moldura(page: Page, carta: ScryfallCard) -> None:
             "tipoIngles": carta.type_line or "",
             "regrasIngles": carta.oracle_text or "",
             "custoDeCor": _custo_de_cor(carta),
-            "coresDaOutraMetade": _cores_da_outra_metade(carta),
+            "custosDasMetades": _custos_das_metades(carta),
         },
     )
     await _esperar_desenho(page)

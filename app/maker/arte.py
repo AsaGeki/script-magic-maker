@@ -126,6 +126,60 @@ def _vale_a_pena(
     return _pixels(arte) > _pixels(referencia)
 
 
+# Onde a moldura dividida abre as duas janelas de arte, medido na carta gerada.
+# A de cima e a segunda metade, como a carta impressa mostra.
+JANELAS_DA_DIVIDIDA = (
+    {"x": 0.1592, "y": 0.0544, "largura": 0.3702, "altura": 0.3866},
+    {"x": 0.1592, "y": 0.5107, "largura": 0.3702, "altura": 0.3870},
+)
+
+# Proporcao da carta gerada, so pra montar a imagem no tamanho certo.
+LARGURA_DA_CARTA = 2010
+ALTURA_DA_CARTA = 2814
+
+
+async def dividida(carta: ScryfallCard) -> str | None:
+    """Data URL com as DUAS artes da carta dividida, ja nas janelas.
+
+    O gerador so tem uma fonte de arte, e a carta dividida tem duas janelas: a
+    saida e uma imagem do tamanho da carta com cada arte no lugar dela, que
+    entra como arte unica e aparece pelas duas janelas.
+
+    As duas artes vem do art_crop, que na carta dividida traz as duas lado a
+    lado e deitadas - nem o MTGPics nem as faces do Scryfall trazem separadas.
+    """
+    async with httpx.AsyncClient(
+        timeout=TIMEOUT, follow_redirects=True, headers=CABECALHOS
+    ) as client:
+        recorte = await _art_crop_em_ingles(client, carta)
+    if recorte is None:
+        return None
+    try:
+        inteira = Image.open(BytesIO(recorte)).convert("RGB")
+    except (UnidentifiedImageError, OSError):
+        return None
+
+    meio = inteira.width // 2
+    # A da direita e a metade de cima da carta em pe.
+    metades = (
+        inteira.crop((meio, 0, inteira.width, inteira.height)),
+        inteira.crop((0, 0, meio, inteira.height)),
+    )
+    montagem = Image.new("RGB", (LARGURA_DA_CARTA, ALTURA_DA_CARTA), "black")
+    for metade, janela in zip(metades, JANELAS_DA_DIVIDIDA, strict=True):
+        largura = round(janela["largura"] * LARGURA_DA_CARTA)
+        altura = round(janela["altura"] * ALTURA_DA_CARTA)
+        # A arte esta deitada como a carta se le; em pe ela gira junto do texto.
+        deitada = metade.transpose(Image.Transpose.ROTATE_90)
+        montagem.paste(
+            deitada.resize((largura, altura)),
+            (round(janela["x"] * LARGURA_DA_CARTA), round(janela["y"] * ALTURA_DA_CARTA)),
+        )
+    saida = BytesIO()
+    montagem.save(saida, format="JPEG", quality=92)
+    return _data_url(saida.getvalue())
+
+
 async def _melhor_do_mtgpics(
     client: httpx.AsyncClient, carta: ScryfallCard, referencia: bytes
 ) -> bytes | None:
