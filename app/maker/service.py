@@ -53,6 +53,8 @@ MOLDURAS = {
     "Caso": "Case",
     "Classe": "Class",
     "Vanguarda": "Vanguard",
+    "Aventura": "Adventure",
+    "Virada": "Flip",
 }
 
 # Layout cuja moldura propria o autoFrame ja alcanca.
@@ -61,6 +63,8 @@ MOLDURA_DO_LAYOUT = {
     Layout.CASE: "Caso",
     Layout.CLASS: "Classe",
     Layout.VANGUARD: "Vanguarda",
+    Layout.ADVENTURE: "Aventura",
+    Layout.FLIP: "Virada",
 }
 MOLDURA_PADRAO = "M15Regular-1"
 
@@ -147,13 +151,7 @@ LAYOUTS_DE_DUAS_FACES = frozenset(
 # A moldura normal so tem lugar pra uma delas, entao a outra sumiria: melhor
 # recusar. Layout que so muda o desenho (saga, classe, plano...) passa, com o
 # texto todo na caixa de regras.
-LAYOUTS_QUE_PERDEM_TEXTO = frozenset(
-    {
-        Layout.SPLIT,
-        Layout.ADVENTURE,
-        Layout.FLIP,
-    }
-)
+LAYOUTS_QUE_PERDEM_TEXTO = frozenset({Layout.SPLIT})
 
 _IMPRESSAO_DIGITAL = carregar("impressao-digital")
 
@@ -243,8 +241,12 @@ def _custo_de_cor(carta: ScryfallCard) -> str:
     moldura de artefato. As cores do Scryfall viram simbolos so pra essa
     leitura; o custo de verdade volta logo depois (ver aplicar-moldura.js).
     """
-    if carta.mana_cost:
-        return carta.mana_cost
+    # Carta de duas metades traz os dois custos juntos ("{2}{W}{B} // {W}{B}"),
+    # e o cardFrameProperties le a barra como simbolo hibrido. So o da frente
+    # decide a cor da moldura.
+    da_frente = carta.faces[0].mana_cost if carta.card_faces else carta.mana_cost
+    if da_frente:
+        return da_frente
     return "".join(f"{{{cor}}}" for cor in carta.colors or [])
 
 
@@ -528,6 +530,48 @@ async def _aplicar_classe(page: Page, carta: ScryfallCard) -> None:
     await _esperar_desenho(page)
 
 
+_APLICAR_VIRADA = carregar("aplicar-virada")
+
+
+async def _aplicar_virada(page: Page, carta: ScryfallCard) -> None:
+    """Depois da moldura: o import do gerador para na metade de cima, entao a
+    metade virada sai daqui (ver aplicar-virada.js)."""
+    if carta.layout != Layout.FLIP or not carta.card_faces:
+        return
+    virada = carta.card_faces[1]
+    await page.evaluate(
+        _APLICAR_VIRADA,
+        {
+            "nome": virada.nome_exibido,
+            "tipo": virada.tipo_exibido or "",
+            "regras": virada.texto_exibido or "",
+            "pt": f"{virada.power}/{virada.toughness}" if virada.power else "",
+        },
+    )
+    await _esperar_desenho(page)
+
+
+_APLICAR_AVENTURA = carregar("aplicar-aventura")
+
+
+async def _aplicar_aventura(page: Page, carta: ScryfallCard) -> None:
+    """Depois da moldura: o import do gerador para na face da criatura, entao a
+    metade da aventura sai daqui (ver aplicar-aventura.js)."""
+    if carta.layout != Layout.ADVENTURE or not carta.card_faces:
+        return
+    aventura = carta.card_faces[1]
+    await page.evaluate(
+        _APLICAR_AVENTURA,
+        {
+            "nome": aventura.nome_exibido,
+            "tipo": aventura.tipo_exibido or "",
+            "custo": aventura.mana_cost or "",
+            "regras": aventura.texto_exibido or "",
+        },
+    )
+    await _esperar_desenho(page)
+
+
 _APLICAR_VANGUARDA = carregar("aplicar-vanguarda")
 
 
@@ -742,6 +786,8 @@ async def _preencher(
         await _aplicar_saga(page, carta)
         await _aplicar_classe(page, carta)
         await _aplicar_vanguarda(page, carta)
+        await _aplicar_aventura(page, carta)
+        await _aplicar_virada(page, carta)
         await _aplicar_selo(page, carta)
         await _aplicar_marca_dagua(page, carta, moldura)
         await _aplicar_nome_traduzido(page, carta, preferir_arena=usar_arena)
