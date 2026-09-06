@@ -1,0 +1,44 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+index 4ca20cf..8f39f13 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -5150,25 +5150,29 @@ function changeCardIndex() {
+ 					document.querySelector('#info-number').value = number;
+ 
+ 					bottomInfoEdited();
+-				} else if (setObject.printed_size) {
++				/* script-magic-maker: numero-de-tres-digitos-sem-total */
++				// O numero e escrito com tres digitos mesmo sem o total: o Scryfall
++				// nao publica printed_size de toda colecao, e sem ele o numero saia
++				// cru ("1" onde a carta traz "001").
++				} else {
+ 					var number = document.querySelector('#info-number').value;
+ 
+ 					while (number.length < 3) {
+ 						number = '0' + number;
+ 					}
+ 
+-					var printedSize = setObject.printed_size;
+-					while (printedSize.length < 3) {
+-						printedSize = '0' + printedSize;
+-					}
++					if (setObject.printed_size) {
++						var printedSize = setObject.printed_size;
++						while (printedSize.length < 3) {
++							printedSize = '0' + printedSize;
++						}
+ 
+-					if (parseInt(number) <= parseInt(printedSize)) {
+-						document.querySelector('#info-number').value = number + "/" + printedSize;
+-					} else {
+-						document.querySelector('#info-number').value = number;
++						if (parseInt(number) <= parseInt(printedSize)) {
++							number = number + "/" + printedSize;
++						}
+ 					}
+ 
+-					
++					document.querySelector('#info-number').value = number;
+ 					bottomInfoEdited();
+ 				}
+ 			}

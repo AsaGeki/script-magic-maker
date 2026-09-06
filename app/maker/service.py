@@ -10,6 +10,7 @@ import asyncio
 import base64
 import re
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 
 from playwright.async_api import Browser, Page, Route, async_playwright
@@ -107,6 +108,12 @@ HOSTS_LIBERADOS = (
 GRUPO_INICIAL = "Standard-3"
 PACOTE_INICIAL = "M15Regular-1"
 
+# A Wizards trocou o rodape em March of the Machine: antes vinha o numero com
+# tres digitos e o total da colecao ("017/281 C"), depois so o numero com quatro
+# ("R 0011"). O gerador monta os dois formatos sozinho - o que falta e dizer
+# qual, pela data da impressao.
+PRIMEIRA_EDICAO_COM_NUMERO_DE_QUATRO_DIGITOS = date(2023, 4, 21)
+
 # Cada um destes rende duas imagens, uma por face, e o fluxo daqui salva uma so.
 LAYOUTS_DE_DUAS_FACES = frozenset(
     {
@@ -202,6 +209,14 @@ def _texto_de_reserva(carta: ScryfallCard) -> str:
     if e_terreno_basico(carta):
         return ""
     return carta.texto_exibido or ""
+
+
+def _rodape_de_quatro_digitos(carta: ScryfallCard) -> bool:
+    """Se esta impressao usa o rodape novo, so com o numero em quatro digitos."""
+    return (
+        carta.released_at is not None
+        and carta.released_at >= PRIMEIRA_EDICAO_COM_NUMERO_DE_QUATRO_DIGITOS
+    )
 
 
 def _e_planeswalker(carta: ScryfallCard) -> bool:
@@ -519,6 +534,15 @@ async def _preencher(
             "(lang) => { document.querySelector('#import-language').value = lang; }", carta.lang
         )
         await page.select_option("#autoFrame", moldura)
+        # setBottomInfoStyle() de novo porque o layout do rodape ja foi montado
+        # na abertura da pagina, quando ainda nao se sabia qual carta viria.
+        await page.evaluate(
+            """(novo) => {
+                document.querySelector('#enableNewCollectorStyle').checked = novo;
+                return setBottomInfoStyle();
+            }""",
+            _rodape_de_quatro_digitos(carta),
+        )
         # Com todas as impressoes na lista, o gerador casa a arte pela
         # ilustracao da impressao escolhida. Marcado por evaluate, nao por
         # page.check(): o onchange dispara uma busca extra no Scryfall com o
