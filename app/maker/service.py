@@ -15,7 +15,7 @@ from pathlib import Path
 
 from playwright.async_api import Browser, Page, Route, async_playwright
 
-from app.cards.enums import Layout
+from app.cards.enums import Layout, Rarity
 from app.cards.models import ScryfallCard
 from app.cards.palavras_chave import palavras_de_habilidade
 from app.cards.service import e_terreno_basico
@@ -217,6 +217,15 @@ def _rodape_de_quatro_digitos(carta: ScryfallCard) -> bool:
         carta.released_at is not None
         and carta.released_at >= PRIMEIRA_EDICAO_COM_NUMERO_DE_QUATRO_DIGITOS
     )
+
+
+def _e_terreno_comum(carta: ScryfallCard) -> bool:
+    """Se o rodape leva "L" no lugar da inicial da raridade.
+
+    Terreno comum e o unico caso: MH3 308, LCI 397, REX 26 e OTJ 260 saem com
+    "L" onde o Scryfall diz common. Incomum, rara e mitica seguem a inicial.
+    """
+    return carta.rarity == Rarity.COMMON and "land" in (carta.type_line or "").lower()
 
 
 def _e_planeswalker(carta: ScryfallCard) -> bool:
@@ -422,6 +431,18 @@ async def _aplicar_selo(page: Page, carta: ScryfallCard) -> None:
     await _esperar_desenho(page)
 
 
+async def _aplicar_raridade(page: Page, carta: ScryfallCard) -> None:
+    """Depois do import: e ele que preenche o campo com a inicial do Scryfall."""
+    if not _e_terreno_comum(carta):
+        return
+    await page.evaluate(
+        """() => {
+            document.querySelector('#info-rarity').value = 'L';
+            return bottomInfoEdited();
+        }"""
+    )
+
+
 _APLICAR_NOME_TRADUZIDO = carregar("aplicar-nome-traduzido")
 
 
@@ -595,6 +616,7 @@ async def _preencher(
         await _aplicar_selo(page, carta)
         await _aplicar_marca_dagua(page, carta, moldura)
         await _aplicar_nome_traduzido(page, carta, preferir_arena=usar_arena)
+        await _aplicar_raridade(page, carta)
         await _redesenhar_texto_final(page)
         if arte_mtgpics:
             await _aplicar_arte(page, carta)
