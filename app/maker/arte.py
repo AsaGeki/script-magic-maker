@@ -75,9 +75,10 @@ async def _melhor_do_mtgpics(
 ) -> bytes | None:
     """A arte do MTGPics que casa com a ilustracao desta impressao.
 
-    O titulo da pagina confirma a carta e o ilustrador da ficha separa as
-    ilustracoes entre si - o que importa em terreno basico, onde o nome nao
-    distingue nada. A assinatura de imagem so desempata o que sobrar.
+    O titulo da pagina confirma a carta e a miniatura numerada como a impressao
+    a identifica sozinha. Sem essa, o ilustrador da ficha separa as ilustracoes
+    entre si - o que importa em terreno basico, onde o nome nao distingue nada -
+    e a assinatura de imagem desempata o que sobrar.
     """
     assinatura_alvo = _assinatura(referencia)
     if assinatura_alvo is None:
@@ -91,24 +92,27 @@ async def _melhor_do_mtgpics(
         return None
 
     miniaturas = _miniaturas(pagina)
-    # Confirmada a pagina, a miniatura numerada como a impressao e ela mesma: e
-    # o unico criterio exato quando a carta tem varias artes do mesmo
-    # ilustrador, onde a assinatura de imagem decide por margem minima.
+    # Confirmada a pagina, edicao e numero identificam a impressao sozinhos - e
+    # o unico criterio exato quando a carta tem varias artes.
     desta_impressao = (carta.set.lower(), carta.collector_number.zfill(3).lower())
     candidatas = []
     for ident, edicao, numero in miniaturas:
-        # Com uma ilustracao so nao ha o que separar, e o titulo ja confirmou a
-        # carta: exigir o ilustrador ali perde arte por divergencia de grafia
-        # entre as duas fontes.
-        if len(miniaturas) > 1 and not await _e_do_ilustrador(client, ident, carta.artist):
+        e_desta = (edicao.lower(), numero.lower()) == desta_impressao
+        # O ilustrador so decide o que a numeracao nao decidiu. Cobrar dele a
+        # miniatura da propria impressao, ou a unica da pagina, perde arte por
+        # divergencia de grafia e por credito errado no MTGPics.
+        precisa_do_ilustrador = not e_desta and len(miniaturas) > 1
+        if precisa_do_ilustrador and not await _e_do_ilustrador(client, ident, carta.artist):
             continue
         imagem = await _baixar_imagem(client, _url_da_arte(f"{edicao}/{numero}"))
         if imagem is None:
             continue
         distancia = _distancia(imagem, assinatura_alvo)
         if distancia is not None:
-            e_desta = (edicao.lower(), numero.lower()) == desta_impressao
-            candidatas.append((0 if e_desta else 1, distancia, _pixels(imagem), imagem))
+            # O sufixo "_N" marca outra resolucao do mesmo numero, nao outra
+            # ilustracao: o grupo e o numero sem ele.
+            grupo = (edicao.lower(), numero.lower().split("_")[0])
+            candidatas.append((grupo, 0 if e_desta else 1, distancia, _pixels(imagem), imagem))
 
     if not candidatas:
         logger.info(
@@ -117,9 +121,15 @@ async def _melhor_do_mtgpics(
             carta.artist,
         )
         return None
-    # A da propria impressao vem primeiro; sem ela decide a menor distancia, e o
-    # empate vai pra imagem maior.
-    return min(candidatas, key=lambda item: (item[0], item[1], -item[2]))[3]
+    # A da propria impressao vem primeiro; sem ela decide a menor distancia do
+    # grupo. Dentro do grupo vencedor vale a imagem maior: reduzir a mesma arte
+    # mexe na assinatura o bastante pra versao pequena parecer mais parecida.
+    def _peso(grupo: tuple[str, str]) -> tuple[int, int]:
+        do_grupo = [c for c in candidatas if c[0] == grupo]
+        return (min(c[1] for c in do_grupo), min(c[2] for c in do_grupo))
+
+    melhor = min({c[0] for c in candidatas}, key=_peso)
+    return max((c for c in candidatas if c[0] == melhor), key=lambda c: c[3])[4]
 
 
 def _url_da_arte(caminho: str) -> str:
