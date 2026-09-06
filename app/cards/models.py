@@ -105,6 +105,11 @@ class ScryfallCard(FaceBase):
     # null quando a impressão não leva selo.
     security_stamp: str | None = None
 
+    # Só vanguard usa: quanto a carta muda o tamanho da mão inicial e o total de
+    # vida. Vêm como texto com sinal ("+1", "-8"), que é como a carta imprime.
+    hand_modifier: str | None = None
+    life_modifier: str | None = None
+
     @property
     def traduzida(self) -> bool:
         """Se esta impressão é a versão em português.

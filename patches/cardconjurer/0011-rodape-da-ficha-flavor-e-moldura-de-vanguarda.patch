@@ -1,0 +1,125 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+index 1cae107..5488ea9 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -899,6 +899,10 @@ function autoFrame() {
+ 	} else if (frame == 'Class') {
+ 		group = 'Saga-1';
+ 		autoClassFrame(colors, card.text.mana.text, card.text.type.text, '');
++	/* script-magic-maker: moldura-de-vanguarda */
++	} else if (frame == 'Vanguard') {
++		group = 'Misc-2';
++		autoVanguardFrame(colors, '', card.text.type.text, '');
+ 	}
+ 
+ 	if (autoFramePack != frame) {
+@@ -906,6 +910,35 @@ function autoFrame() {
+ 		autoFramePack = frame;
+ 	}
+ }
++/* script-magic-maker: moldura-de-vanguarda */
++// packVanguard.js so e alcancavel pelo seletor manual de pacote. A moldura e
++// uma imagem so, sem cor: o que ela traz de proprio sao os campos do tamanho de
++// mao e do total de vida iniciais, que moldura nenhuma de carta comum tem.
++async function autoVanguardFrame(colors, mana_cost, type_line, power) {
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	await resetCardIrregularities({resetOthers: false});
++	card.version = 'm15Regular';
++	card.artBounds = {x: 0.1214, y: 0.0991, width: 0.7567, height: 0.4767};
++	autoFitArt();
++	card.setSymbolBounds = {x: 0.5, y: 0.9458, width: 0.0307, height: 0.022, vertical: 'center', horizontal: 'center'};
++	resetSetSymbol();
++	card.watermarkBounds = {x: 0.5, y: 0.7762, width: 0.75, height: 0.2305};
++	resetWatermark();
++	loadTextOptions({
++		title: {name: 'Title', text: '', x: 0.1767, y: 0.0472, width: 0.6467, height: 0.0543, oneLine: true, font: 'fritz-quadrata', size: 0.0377, align: 'center'},
++		type: {name: 'Type', text: '', x: 0.1767, y: 0.5762, width: 0.6467, height: 0.0543, oneLine: true, font: 'fritz-quadrata', size: 0.0262, align: 'center'},
++		rules: {name: 'Rules Text', text: '', x: 0.12, y: 0.6286, width: 0.76, height: 0.1167, size: 0.0267, align: 'center'},
++		leftval: {name: 'Left Mod Value', text: '', x: 0.1094, y: 0.8386, width: 0.0667, height: 0.0524, size: 0.0267, oneLine: true, align: 'center'},
++		rightval: {name: 'Right Mod Value', text: '', x: 0.824, y: 0.8386, width: 0.0667, height: 0.0524, size: 0.0267, oneLine: true, align: 'center'},
++		left: {name: 'Left Mod Desc.', text: 'Starting & Max. Hand Size', x: 0.1114, y: 0.7762, width: 0.0667, height: 0.0596, size: 0.0124, align: 'center'},
++		right: {name: 'Right Mod Desc.', text: 'Starting Life', x: 0.826, y: 0.7762, width: 0.0667, height: 0.0596, size: 0.0124, align: 'center'}
++	});
++
++	card.frames = [{name: 'Vanguard Frame', src: '/img/frames/vanguard/vanguard.png', masks: []}];
++	await card.frames.forEach(item => addFrame([], item));
++}
+ /* script-magic-maker: moldura-de-classe */
+ // Mesma pilha de molduras do caso - os dois pacotes usam os arquivos de
+ // /img/frames/class -, o que muda sao os campos de texto e o versionClass.js,
+@@ -4476,6 +4509,16 @@ CanvasRenderingContext2D.prototype.measureJustifiedText = function(text, width,
+ function widthToAngle(width, radius) {
+ 	return width / radius;
+ }
++/* script-magic-maker: assinatura-do-flavor-em-linha-propria */
++// A carta impressa poe a assinatura do flavor em linha propria, mas o
++// flavor_text do Scryfall nem sempre traz a quebra (M14 #139 nao traz, SNC
++// #18 traz). Sem ela o travessao fica colado no fim da frase anterior.
++function comQuebraNaAssinatura(texto) {
++	if (texto.includes('\n')) {
++		return texto;
++	}
++	return texto.replace(/([.!?"\u201d'\u2019])\s*(—\s?[^—]{1,40})$/, '$1\n$2');
++}
+ function curlyQuotes(input) {
+ 	return input
+ 		.replace(/ '/g, ' ‘').replace(/^'/, '‘').replace(/'/g, '’')
+@@ -5348,15 +5391,15 @@ function changeCardIndex() {
+ 			if (card.version == 'pokemon') {
+ 				if (cardToImport.type_line.toLowerCase().includes('creature')) {
+ 					card.text.rules.text += '{flavor}';
+-					card.text.rules.text += curlyQuotes(flavorText.replace('\n', '{lns}'));
++					card.text.rules.text += curlyQuotes(comQuebraNaAssinatura(flavorText).replace('\n', '{lns}'));
+ 				} else {
+ 					card.text.rules.text += '{flavor}';
+-					card.text.rulesnoncreature.text += curlyQuotes(flavorText.replace('\n', '{lns}'));
++					card.text.rulesnoncreature.text += curlyQuotes(comQuebraNaAssinatura(flavorText).replace('\n', '{lns}'));
+ 				}
+ 				
+ 			} else {
+ 				card.text.rules.text += '{flavor}';
+-				card.text.rules.text += curlyQuotes(flavorText.replace('\n', '{lns}'));
++				card.text.rules.text += curlyQuotes(comQuebraNaAssinatura(flavorText).replace('\n', '{lns}'));
+ 			}
+ 
+ 			
+@@ -5432,6 +5475,12 @@ function changeCardIndex() {
+ 		setXhttp.onreadystatechange = function() {
+ 			if (this.readyState == 4 && this.status == 200) {
+ 				var setObject = JSON.parse(this.responseText)
++				/* script-magic-maker: codigo-da-colecao-mae-na-ficha */
++				// A ficha vive numa colecao propria ("TM20"), mas imprime o codigo da
++				// colecao que a criou ("M20"). O parent_set_code diz qual e.
++				if (setObject.set_type == 'token' && setObject.parent_set_code) {
++					document.querySelector('#info-set').value = setObject.parent_set_code.toUpperCase();
++				}
+ 				if (document.querySelector('#enableNewCollectorStyle').checked) {
+ 					var number = document.querySelector('#info-number').value;
+ 
+@@ -5454,7 +5503,10 @@ function changeCardIndex() {
+ 					}
+ 
+ 					if (setObject.printed_size) {
+-						var printedSize = setObject.printed_size;
++						/* script-magic-maker: total-da-colecao-com-tres-digitos */
++						// O JSON traz printed_size como numero: sem String() o .length do
++						// laco abaixo e undefined e o total sai sem os zeros ("030/30").
++						var printedSize = String(setObject.printed_size);
+ 						while (printedSize.length < 3) {
+ 							printedSize = '0' + printedSize;
+ 						}
+diff --git a/creator/index.html b/creator/index.html
+index dc52369..955d3ab 100644
+--- a/creator/index.html
++++ b/creator/index.html
+@@ -731,6 +731,8 @@
+ 							<option value="Case">Case</option>
+ 							<!-- script-magic-maker: moldura-de-classe -->
+ 							<option value="Class">Class</option>
++							<!-- script-magic-maker: moldura-de-vanguarda -->
++							<option value="Vanguard">Vanguard</option>
+ 							<option value="UBNew">Universes Beyond (Accurate)</option>
+ 
+ 							<option disabled>Custom frames</option>

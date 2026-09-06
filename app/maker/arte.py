@@ -164,11 +164,23 @@ async def _melhor_do_mtgpics(
         if imagem is None:
             continue
         distancia = _distancia(imagem, assinatura_alvo)
-        if distancia is not None:
-            # O sufixo "_N" marca outra resolucao do mesmo numero, nao outra
-            # ilustracao: o grupo e o numero sem ele.
-            grupo = (edicao.lower(), numero.lower().split("_")[0])
-            candidatas.append((grupo, 0 if e_desta else 1, distancia, _pixels(imagem), imagem))
+        if distancia is None:
+            continue
+        semelhanca = _semelhanca_de_cor(imagem, referencia)
+        if semelhanca < SEMELHANCA_MINIMA:
+            logger.info(
+                "%s: a arte %s/%s do MTGPics tem outra paleta (%.2f), e outra "
+                "ilustracao",
+                carta.nome_exibido,
+                edicao,
+                numero,
+                semelhanca,
+            )
+            continue
+        # O sufixo "_N" marca outra resolucao do mesmo numero, nao outra
+        # ilustracao: o grupo e o numero sem ele.
+        grupo = (edicao.lower(), numero.lower().split("_")[0])
+        candidatas.append((grupo, 0 if e_desta else 1, distancia, _pixels(imagem), imagem))
 
     if not candidatas:
         logger.info(
@@ -383,6 +395,47 @@ def _pixels(imagem: bytes) -> int:
 
 def _data_url(imagem: bytes) -> str:
     return f"data:image/jpeg;base64,{base64.b64encode(imagem).decode()}"
+
+
+# Quanto as paletas precisam se sobrepor pra serem a mesma ilustracao. Medido
+# no acervo: a arte errada da M15 #279 fica em 0.37 e a mais folgada das certas
+# em 0.70. O dHash nao serve de piso aqui - ele poe arte certa em 28 bits e a
+# errada em 32.
+SEMELHANCA_MINIMA = 0.55
+
+# Lado da miniatura e quantas faixas por canal no histograma.
+_LADO_DO_HISTOGRAMA = 32
+_FAIXAS_POR_CANAL = 4
+
+
+def _semelhanca_de_cor(imagem: bytes, referencia: bytes) -> float:
+    """Quanto as duas imagens dividem a mesma paleta, de 0 a 1.
+
+    Recorte e resolucao diferentes mexem pouco na distribuicao de cor, entao
+    isso separa "mesma ilustracao, outro corte" de "outra ilustracao" - que e
+    justamente o que a assinatura de estrutura nao separa.
+    """
+    de_um, do_outro = _histograma(imagem), _histograma(referencia)
+    if de_um is None or do_outro is None:
+        return 1.0
+    return sum(min(a, b) for a, b in zip(de_um, do_outro, strict=True))
+
+
+def _histograma(imagem: bytes) -> list[float] | None:
+    try:
+        aberta = Image.open(BytesIO(imagem)).convert("RGB")
+    except (UnidentifiedImageError, OSError):
+        return None
+    aberta = aberta.resize((_LADO_DO_HISTOGRAMA, _LADO_DO_HISTOGRAMA))
+    deslocamento = 8 - (_FAIXAS_POR_CANAL.bit_length() - 1)
+    faixas = [0] * (_FAIXAS_POR_CANAL**3)
+    for vermelho, verde, azul in aberta.getdata():
+        indice = (vermelho >> deslocamento) * _FAIXAS_POR_CANAL**2
+        indice += (verde >> deslocamento) * _FAIXAS_POR_CANAL
+        indice += azul >> deslocamento
+        faixas[indice] += 1
+    total = sum(faixas)
+    return [quantidade / total for quantidade in faixas] if total else None
 
 
 def _distancia(imagem: bytes, assinatura_alvo: int) -> int | None:

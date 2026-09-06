@@ -10,6 +10,9 @@
 //
 // A moldura de terreno de arte cheia nao tem caixa de regras, e e do texto dela
 // que sai a cor do terreno: sem o campo, ele e criado so durante a chamada.
+//
+// O custo de mana entra pelo mesmo caminho: a cor da moldura sai dele, e ficha
+// nao tem custo nenhum - a Fada azul cairia na moldura de artefato.
 (args) => {
     const emprestar = (campo, valorIngles) => {
         const original = card.text[campo];
@@ -24,7 +27,9 @@
 
     const devolverTipo = emprestar('type', args.tipoIngles);
     const devolverRegras = emprestar('rules', args.regrasIngles);
+    const devolverCusto = emprestar('mana', args.custoDeCor);
     autoFrame();
+    devolverCusto();
     devolverRegras();
     devolverTipo();
 }

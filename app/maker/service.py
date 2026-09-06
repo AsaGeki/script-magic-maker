@@ -52,6 +52,7 @@ MOLDURAS = {
     "Saga": "SagaRegular",
     "Caso": "Case",
     "Classe": "Class",
+    "Vanguarda": "Vanguard",
 }
 
 # Layout cuja moldura propria o autoFrame ja alcanca.
@@ -59,6 +60,7 @@ MOLDURA_DO_LAYOUT = {
     Layout.SAGA: "Saga",
     Layout.CASE: "Caso",
     Layout.CLASS: "Classe",
+    Layout.VANGUARD: "Vanguarda",
 }
 MOLDURA_PADRAO = "M15Regular-1"
 
@@ -171,17 +173,25 @@ _AJUSTAR_CAIXA_DE_REGRAS = carregar("ajustar-caixa-de-regras")
 
 # O simbolo de mana grande na caixa do terreno basico e desenhado como marca
 # d'agua, e ela precisa de imagem e cor: com watermarkLeft em 'none' nada e
-# pintado, com 'default' sai o svg cru, preto. Os hex sao os do proprio seletor
-# do gerador.
+# pintado, com 'default' sai o svg cru, preto.
+#
+# As quatro cores medidas sao as das basicas de Modern Horizons 2, iguais entre
+# as duas impressoes de cada cor. O branco fica no hex apagado do seletor do
+# gerador: na carta impressa o simbolo branco tem a cor da propria caixa e quem
+# o separa e a sombra, que a marca d'agua daqui nao desenha.
 MARCA_DAGUA_DE_TERRENO = {
     "W": ("/img/watermarks/w.svg", "#b79d58"),
-    "U": ("/img/watermarks/u.svg", "#8cacc5"),
-    "B": ("/img/watermarks/b.svg", "#5e5e5e"),
-    "R": ("/img/watermarks/r.svg", "#c66d39"),
-    "G": ("/img/watermarks/g.svg", "#598c52"),
+    "U": ("/img/watermarks/u.svg", "#0a6fb2"),
+    "B": ("/img/watermarks/b.svg", "#100c08"),
+    "R": ("/img/watermarks/r.svg", "#d62436"),
+    "G": ("/img/watermarks/g.svg", "#007c46"),
 }
 
 _APLICAR_MARCA_DAGUA = carregar("aplicar-marca-dagua")
+
+# Em porcentagem, como o campo do gerador. Ver aplicar-marca-dagua.js: o padrao
+# dele e 40, e no terreno basico a carta impressa traz o simbolo quase opaco.
+OPACIDADE_DA_MARCA_DAGUA = 100
 
 INTERVALO_AMOSTRA = 0.3
 AMOSTRAS_IGUAIS = 3  # leituras seguidas sem mudanca = desenho terminou
@@ -224,6 +234,18 @@ def _rodape_de_quatro_digitos(carta: ScryfallCard) -> bool:
         carta.released_at is not None
         and carta.released_at >= PRIMEIRA_EDICAO_COM_NUMERO_DE_QUATRO_DIGITOS
     )
+
+
+def _custo_de_cor(carta: ScryfallCard) -> str:
+    """O custo de mana que o autoFrame le pra escolher a cor da moldura.
+
+    Ficha nao tem custo, e sem ele a Fada azul e o Inseto preto-verde caem na
+    moldura de artefato. As cores do Scryfall viram simbolos so pra essa
+    leitura; o custo de verdade volta logo depois (ver aplicar-moldura.js).
+    """
+    if carta.mana_cost:
+        return carta.mana_cost
+    return "".join(f"{{{cor}}}" for cor in carta.colors or [])
 
 
 def _letra_da_raridade(carta: ScryfallCard) -> str | None:
@@ -425,7 +447,10 @@ async def _aplicar_marca_dagua(page: Page, carta: ScryfallCard, moldura: str) ->
     if marca is None:
         return
     imagem, cor = marca
-    await page.evaluate(_APLICAR_MARCA_DAGUA, {"imagem": imagem, "cor": cor})
+    await page.evaluate(
+        _APLICAR_MARCA_DAGUA,
+        {"imagem": imagem, "cor": cor, "opacidade": OPACIDADE_DA_MARCA_DAGUA},
+    )
     await _esperar_desenho(page)
 
 
@@ -503,6 +528,20 @@ async def _aplicar_classe(page: Page, carta: ScryfallCard) -> None:
     await _esperar_desenho(page)
 
 
+_APLICAR_VANGUARDA = carregar("aplicar-vanguarda")
+
+
+async def _aplicar_vanguarda(page: Page, carta: ScryfallCard) -> None:
+    """Depois da moldura: os campos de mao e vida so existem na de vanguarda."""
+    if carta.layout != Layout.VANGUARD:
+        return
+    await page.evaluate(
+        _APLICAR_VANGUARDA,
+        {"mao": carta.hand_modifier or "", "vida": carta.life_modifier or ""},
+    )
+    await _esperar_desenho(page)
+
+
 _APLICAR_SELO = carregar("aplicar-selo")
 
 
@@ -554,6 +593,7 @@ async def _aplicar_moldura(page: Page, carta: ScryfallCard) -> None:
         {
             "tipoIngles": carta.type_line or "",
             "regrasIngles": carta.oracle_text or "",
+            "custoDeCor": _custo_de_cor(carta),
         },
     )
     await _esperar_desenho(page)
@@ -701,6 +741,7 @@ async def _preencher(
         await _aplicar_moldura(page, carta)
         await _aplicar_saga(page, carta)
         await _aplicar_classe(page, carta)
+        await _aplicar_vanguarda(page, carta)
         await _aplicar_selo(page, carta)
         await _aplicar_marca_dagua(page, carta, moldura)
         await _aplicar_nome_traduzido(page, carta, preferir_arena=usar_arena)
