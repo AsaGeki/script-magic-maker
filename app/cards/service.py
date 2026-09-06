@@ -4,6 +4,7 @@
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -196,24 +197,52 @@ async def completar_traducao_parcial(carta: ScryfallCard) -> None:
     linha de tipo nula. So vale pra impressao que ja e em portugues, senao a
     carta sai meio traduzida. Texto de regras fica de fora: pode ter mudado por
     errata entre uma impressao e outra.
-    """
-    if not carta.traduzida:
-        return
-    faltando = [
-        campo for campo in ("printed_name", "printed_type_line") if not getattr(carta, campo)
-    ]
-    if not faltando:
-        return
 
+    A linha de tipo ainda tem um ultimo recurso, que vale tambem pra carta que
+    so tem o portugues do Arena: ver `_linha_de_tipo_equivalente`.
+    """
+    if carta.traduzida:
+        faltando = [
+            campo for campo in ("printed_name", "printed_type_line") if not getattr(carta, campo)
+        ]
+        if faltando:
+            async with _cliente() as client:
+                irmas = await _buscar(client, f'!"{carta.name}"', "pt", unique="prints")
+            for irma in irmas:
+                for campo in list(faltando):
+                    if valor := getattr(irma, campo):
+                        setattr(carta, campo, valor)
+                        faltando.remove(campo)
+                if not faltando:
+                    break
+
+    if carta.printed_type_line or not (carta.traduzida or preferir_traducao_do_arena(carta)):
+        return
     async with _cliente() as client:
-        irmas = await _buscar(client, f'!"{carta.name}"', "pt", unique="prints")
-    for irma in irmas:
-        for campo in list(faltando):
-            if valor := getattr(irma, campo):
-                setattr(carta, campo, valor)
-                faltando.remove(campo)
-        if not faltando:
-            return
+        carta.printed_type_line = await _linha_de_tipo_equivalente(client, carta.type_line)
+
+
+async def _linha_de_tipo_equivalente(
+    client: httpx.AsyncClient, em_ingles: str | None
+) -> str | None:
+    """A linha de tipo traduzida de outra carta com a MESMA linha em ingles.
+
+    Diferente de nome e texto, a linha de tipo nao e escrita carta a carta: e
+    montada dos mesmos tipos e subtipos, entao a mesma em ingles e a mesma em
+    portugues. Cobre a impressao antiga que o Scryfall deixou sem
+    printed_type_line (MIR #4) e a carta pos-corte, que so tem o portugues do
+    Arena e nem impressao em portugues tem (FDN #47).
+    """
+    if not em_ingles:
+        return None
+    palavras = re.findall(r"[\w'-]+", em_ingles)
+    if not palavras:
+        return None
+    consulta = " ".join(f't:"{palavra}"' for palavra in palavras)
+    for candidata in await _buscar(client, consulta, "pt", unique="cards"):
+        if candidata.type_line == em_ingles and candidata.printed_type_line:
+            return candidata.printed_type_line
+    return None
 
 
 def e_terreno_basico(carta: ScryfallCard) -> bool:
