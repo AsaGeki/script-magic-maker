@@ -49,6 +49,16 @@ MOLDURAS = {
     "Circuit": "Circuit",
     "Terreno basico de arte cheia": "TextlessBasics2022",
     "Terreno basico sem borda": "TextlessBasicsBorderless",
+    "Saga": "SagaRegular",
+    "Caso": "Case",
+    "Classe": "Class",
+}
+
+# Layout cuja moldura propria o autoFrame ja alcanca.
+MOLDURA_DO_LAYOUT = {
+    Layout.SAGA: "Saga",
+    Layout.CASE: "Caso",
+    Layout.CLASS: "Classe",
 }
 MOLDURA_PADRAO = "M15Regular-1"
 
@@ -61,6 +71,11 @@ def moldura_sugerida(carta: ScryfallCard) -> str:
     (frame/border_color/frame_effects/full_art). Quem quiser outra troca depois.
     """
     efeitos = carta.frame_effects or []
+    # Antes de tudo: layout com moldura propria reparte a carta de um jeito que
+    # nenhuma moldura de carta comum alcanca - faixa de capitulos na lateral,
+    # arte de um lado e texto do outro.
+    if carta.layout in MOLDURA_DO_LAYOUT:
+        return MOLDURAS[MOLDURA_DO_LAYOUT[carta.layout]]
     # Antes das outras: a carta de papel nao tem janela de arte nem caixa de
     # regras, so a borda da cor e o simbolo de mana no canto, e nenhuma moldura
     # de carta comum chega nisso.
@@ -126,23 +141,15 @@ LAYOUTS_DE_DUAS_FACES = frozenset(
     }
 )
 
-# Layout que precisa de moldura propria - capitulo na lateral, duas metades,
-# caixa de lealdade. Como o fluxo daqui monta so a moldura normal, a carta sai
-# com o texto espremido na caixa de regras: melhor recusar.
-LAYOUTS_SEM_MOLDURA_PROPRIA = frozenset(
+# Layout que reparte a carta em duas metades com nome, custo e texto proprios.
+# A moldura normal so tem lugar pra uma delas, entao a outra sumiria: melhor
+# recusar. Layout que so muda o desenho (saga, classe, plano...) passa, com o
+# texto todo na caixa de regras.
+LAYOUTS_QUE_PERDEM_TEXTO = frozenset(
     {
-        Layout.SAGA,
         Layout.SPLIT,
         Layout.ADVENTURE,
         Layout.FLIP,
-        Layout.LEVELER,
-        Layout.CLASS,
-        Layout.CASE,
-        Layout.MUTATE,
-        Layout.BATTLE,
-        Layout.PLANAR,
-        Layout.SCHEME,
-        Layout.VANGUARD,
     }
 )
 
@@ -376,12 +383,27 @@ async def _selecionar_impressao(page: Page, carta: ScryfallCard) -> bool:
     return True
 
 
+async def _aspecto_da_janela_de_arte(page: Page) -> float | None:
+    """Largura/altura da janela onde a moldura encaixa a arte.
+
+    Cada moldura tem a sua (a de saga e alta e estreita, a borderless e a carta
+    inteira), e e ela que diz que formato de arte cabe sem sobrar corte.
+    """
+    return await page.evaluate(
+        """() => {
+            const b = card.artBounds;
+            if (!b || !b.width || !b.height) return null;
+            return (b.width * card.width) / (b.height * card.height);
+        }"""
+    )
+
+
 async def _aplicar_arte(page: Page, carta: ScryfallCard) -> bool:
     """Troca a arte que o gerador achou sozinho pela maior disponivel.
 
     Quem escolhe e confere e o app.maker.arte; aqui a imagem so e entregue.
     """
-    data_url = await arte.buscar(carta)
+    data_url = await arte.buscar(carta, await _aspecto_da_janela_de_arte(page))
     if data_url is None:
         return False
     await page.evaluate("(src) => uploadArt(src, 'autoFit')", data_url)
@@ -416,6 +438,61 @@ async def _redesenhar_texto_final(page: Page) -> None:
     await page.evaluate(_AJUSTAR_LINHA_DE_TIPO)
     await page.evaluate(_AJUSTAR_CAIXA_DE_REGRAS)
     await page.evaluate("() => drawTextBuffer()")
+    await _esperar_desenho(page)
+
+
+_APLICAR_SAGA = carregar("aplicar-saga")
+
+# Linha de capitulo: os numerais romanos que o bloco cobre, o travessao e o
+# texto. "I, II, III — Crie uma ficha..." cobre tres capitulos num bloco so.
+_CAPITULO_DE_SAGA = re.compile(r"^([IVX]+(?:,\s*[IVX]+)*)\s*—\s*(.+)$", re.DOTALL)
+
+# O pacote de saga tem quatro blocos de habilidade.
+BLOCOS_DE_SAGA = 4
+
+
+def _capitulos_de_saga(carta: ScryfallCard) -> dict | None:
+    """Quebra o texto da saga no lembrete e nos blocos de capitulo.
+
+    Devolve None quando o texto nao esta no formato esperado; ai a carta segue
+    com a moldura montada e os blocos vazios, em vez de sair pela metade.
+    """
+    linhas = [linha for linha in (carta.texto_exibido or "").split("\n") if linha.strip()]
+    if not linhas:
+        return None
+    lembrete = linhas.pop(0) if linhas[0].startswith("(") else ""
+    blocos = []
+    for linha in linhas[:BLOCOS_DE_SAGA]:
+        achado = _CAPITULO_DE_SAGA.match(linha)
+        if not achado:
+            return None
+        blocos.append(
+            {"capitulos": len(achado.group(1).split(",")), "texto": achado.group(2)}
+        )
+    return {"lembrete": lembrete, "blocos": blocos} if blocos else None
+
+
+async def _aplicar_saga(page: Page, carta: ScryfallCard) -> None:
+    """Depois da moldura: os campos de capitulo so existem com o versionSaga.js
+    carregado, e quem manda carregar e a moldura de saga."""
+    if carta.layout != Layout.SAGA:
+        return
+    partes = _capitulos_de_saga(carta)
+    if partes is None:
+        return
+    await page.evaluate(_APLICAR_SAGA, partes)
+    await _esperar_desenho(page)
+
+
+_APLICAR_CLASSE = carregar("aplicar-classe")
+
+
+async def _aplicar_classe(page: Page, carta: ScryfallCard) -> None:
+    """Depois da moldura: os campos de altura de nivel so existem com o
+    versionClass.js carregado, e quem manda carregar e a moldura de classe."""
+    if carta.layout != Layout.CLASS:
+        return
+    await page.evaluate(_APLICAR_CLASSE)
     await _esperar_desenho(page)
 
 
@@ -518,10 +595,10 @@ async def fill_card(
             f"{carta.nome_exibido} e uma carta de {carta.layout}, que rende duas "
             "imagens; o gerador aqui ainda produz uma face so"
         )
-    if carta.layout in LAYOUTS_SEM_MOLDURA_PROPRIA:
+    if carta.layout in LAYOUTS_QUE_PERDEM_TEXTO:
         raise BadRequestError(
-            f"{carta.nome_exibido} tem layout {carta.layout}, que pede moldura "
-            "propria; o gerador aqui monta so a moldura normal e a carta sairia errada"
+            f"{carta.nome_exibido} tem layout {carta.layout}, que reparte a carta em "
+            "duas metades; a moldura normal so comporta uma delas"
         )
     if _e_planeswalker(carta):
         raise BadRequestError(
@@ -613,6 +690,8 @@ async def _preencher(
         if await _selecionar_impressao(page, carta):
             await _esperar_desenho(page)
         await _aplicar_moldura(page, carta)
+        await _aplicar_saga(page, carta)
+        await _aplicar_classe(page, carta)
         await _aplicar_selo(page, carta)
         await _aplicar_marca_dagua(page, carta, moldura)
         await _aplicar_nome_traduzido(page, carta, preferir_arena=usar_arena)

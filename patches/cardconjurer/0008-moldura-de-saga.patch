@@ -1,0 +1,121 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+index 0e973ab..ec579c0 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -886,6 +886,11 @@ function autoFrame() {
+ 	} else if (frame == 'TextlessBasicsBorderless') {
+ 		group = 'Textless-4';
+ 		autoTextlessBasicsBorderlessFrame(colors, card.text.mana.text, card.text.type.text, '');
++	/* script-magic-maker: moldura-de-saga */
++	} else if (frame == 'SagaRegular') {
++		group = 'Saga-1';
++		// Saga nunca tem poder/resistencia, e o campo nem existe no pacote dela.
++		autoSagaRegularFrame(colors, card.text.mana.text, card.text.type.text, '');
+ 	}
+ 
+ 	if (autoFramePack != frame) {
+@@ -893,6 +898,91 @@ function autoFrame() {
+ 		autoFramePack = frame;
+ 	}
+ }
++/* script-magic-maker: moldura-de-saga */
++// packSagaRegular.js so e alcancavel pelo seletor manual de pacote. As bounds e
++// os campos de texto aqui sao os dele; o que se acrescenta e montar a pilha de
++// molduras a partir das cores, como as outras auto*Frame fazem.
++function makeSagaFrameByLetter(letter, mask, maskToRightHalf) {
++	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'A': 'Artifact', 'L': 'Land'};
++	var maskFiles = {
++		'Pinline': '/img/frames/saga/sagaMaskPinline.png',
++		'Title': '/img/frames/m15/regular/m15MaskTitle.png',
++		'Type': '/img/frames/saga/sagaMaskType.png',
++		'Frame': '/img/frames/saga/sagaMaskFrame.png',
++		'Banner': '/img/frames/saga/sagaMaskBanner.png',
++		'Banner (Right)': '/img/frames/saga/sagaMaskBannerRight.png',
++		'Text': '/img/frames/saga/sagaMaskText.png',
++		'Text (Right)': '/img/frames/saga/sagaMaskTextRight.png',
++		'Border': '/img/frames/saga/sagaMaskBorder.png'
++	};
++	letter = letter.toUpperCase();
++	// Banner e Text tem mascara propria pra metade direita; o resto usa a
++	// generica por cima.
++	var nome = maskToRightHalf && maskFiles[mask + ' (Right)'] ? mask + ' (Right)' : mask;
++	var frame = {
++		name: frameNames[letter] + ' Frame',
++		src: letter == 'L' ? '/img/frames/saga/regular/l.png' : '/img/frames/saga/regular/sagaFrame' + letter + '.png',
++		masks: [{src: maskFiles[nome], name: nome}]
++	};
++	if (maskToRightHalf && nome == mask) {
++		frame.masks.push({src: '/img/frames/maskRightHalf.png', name: 'Right Half'});
++	}
++	return frame;
++}
++async function autoSagaRegularFrame(colors, mana_cost, type_line, power) {
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	// resetOthers desligado pra nao refazer o rodape: quem escolhe o estilo dele
++	// e quem chamou, antes desta moldura.
++	await resetCardIrregularities({resetOthers: false});
++	card.version = 'sagaRegular';
++	card.onload = '/js/frames/versionSaga.js';
++	loadScript('/js/frames/versionSaga.js');
++	card.artBounds = {x: 0.5, y: 0.1124, width: 0.4247, height: 0.7253};
++	autoFitArt();
++	card.setSymbolBounds = {x: 0.9227, y: 0.8739, width: 0.12, height: 0.0381, vertical: 'center', horizontal: 'right'};
++	resetSetSymbol();
++	card.watermarkBounds = {x: 0.3027, y: 0.4748, width: 0.3547, height: 0.6767};
++	resetWatermark();
++	loadTextOptions({
++		mana: {name: 'Mana Cost', text: '', y: 0.0613, width: 0.9292, height: 71/2100, oneLine: true, size: 71/1638, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0},
++		title: {name: 'Title', text: '', x: 0.0854, y: 0.0522, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0381},
++		type: {name: 'Type', text: '', x: 0.0854, y: 0.8481, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0324},
++		ability0: {name: 'Ability 1', text: '', x: 0.1334, y: 0.2896, width: 0.35, height: 0.1786, size: 0.0305},
++		ability1: {name: 'Ability 2', text: '', x: 0.1334, y: 0, width: 0.35, height: 0.1786, size: 0.0305},
++		ability2: {name: 'Ability 3', text: '', x: 0.1334, y: 0, width: 0.35, height: 0.1786, size: 0.0305},
++		ability3: {name: 'Ability 4', text: '', x: 0.1334, y: 0, width: 0.35, height: 0, size: 0.0305},
++		// 0.03 e o tamanho do pacote, 11% maior que o da carta impressa: nele
++		// "marcador de conhecimento." nao cabe numa linha e sobra um vao.
++		reminder: {name: 'Reminder Text', text: '', x: 0.0867, y: 0.1129, width: 0.404, height: 0.1772, size: 0.0258, shadowColor: 'white'}
++	});
++
++	var properties = cardFrameProperties(colors, mana_cost, type_line, power);
++	var frames = [];
++	if (properties.pinlineRight) {
++		frames.push(makeSagaFrameByLetter(properties.pinlineRight, 'Pinline', true));
++	}
++	frames.push(makeSagaFrameByLetter(properties.pinline, 'Pinline', false));
++	frames.push(makeSagaFrameByLetter(properties.typeTitle, 'Type', false));
++	frames.push(makeSagaFrameByLetter(properties.typeTitle, 'Title', false));
++	if (properties.rulesRight) {
++		frames.push(makeSagaFrameByLetter(properties.rulesRight, 'Banner', true));
++		frames.push(makeSagaFrameByLetter(properties.rulesRight, 'Text', true));
++	}
++	frames.push(makeSagaFrameByLetter(properties.rules, 'Banner', false));
++	frames.push(makeSagaFrameByLetter(properties.rules, 'Text', false));
++	if (properties.frameRight) {
++		frames.push(makeSagaFrameByLetter(properties.frameRight, 'Frame', true));
++	}
++	frames.push(makeSagaFrameByLetter(properties.frame, 'Frame', false));
++	frames.push(makeSagaFrameByLetter(properties.frame, 'Border', false));
++
++	card.frames = frames;
++	card.frames.reverse();
++	await card.frames.forEach(item => addFrame([], item));
++	card.frames.reverse();
++}
+ async function autoUBFrame(colors, mana_cost, type_line, power) {
+ 	var frames = card.frames.filter(frame => frame.name.includes('Extension') || frame.name.includes('Gray Holo Stamp') || frame.name.includes('Gold Holo Stamp'));
+ 
+diff --git a/creator/index.html b/creator/index.html
+index 5cc6903..498ff40 100644
+--- a/creator/index.html
++++ b/creator/index.html
+@@ -725,6 +725,8 @@
+ 							<!-- script-magic-maker: moldura-de-terreno-de-arte-cheia -->
+ 							<option value="TextlessBasics2022">Fullart Basic Land (2022)</option>
+ 							<option value="TextlessBasicsBorderless">Fullart Basic Land (Borderless)</option>
++							<!-- script-magic-maker: moldura-de-saga -->
++							<option value="SagaRegular">Saga</option>
+ 							<option value="UBNew">Universes Beyond (Accurate)</option>
+ 
+ 							<option disabled>Custom frames</option>

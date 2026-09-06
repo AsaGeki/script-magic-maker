@@ -1,0 +1,253 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+index ec579c0..b4f2a26 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -891,6 +891,14 @@ function autoFrame() {
+ 		group = 'Saga-1';
+ 		// Saga nunca tem poder/resistencia, e o campo nem existe no pacote dela.
+ 		autoSagaRegularFrame(colors, card.text.mana.text, card.text.type.text, '');
++	/* script-magic-maker: moldura-de-caso */
++	} else if (frame == 'Case') {
++		group = 'Saga-1';
++		autoCaseFrame(colors, card.text.mana.text, card.text.type.text, '');
++	/* script-magic-maker: moldura-de-classe */
++	} else if (frame == 'Class') {
++		group = 'Saga-1';
++		autoClassFrame(colors, card.text.mana.text, card.text.type.text, '');
+ 	}
+ 
+ 	if (autoFramePack != frame) {
+@@ -898,6 +906,145 @@ function autoFrame() {
+ 		autoFramePack = frame;
+ 	}
+ }
++/* script-magic-maker: moldura-de-classe */
++// Mesma pilha de molduras do caso - os dois pacotes usam os arquivos de
++// /img/frames/class -, o que muda sao os campos de texto e o versionClass.js,
++// que desenha o cabecalho de cada nivel.
++async function autoClassFrame(colors, mana_cost, type_line, power) {
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	await resetCardIrregularities({resetOthers: false});
++	card.version = 'class';
++	card.onload = '/js/frames/versionClass.js';
++	loadScript('/js/frames/versionClass.js');
++	card.artBounds = {x: 0.0753, y: 0.1124, width: 0.4247, height: 0.7253};
++	autoFitArt();
++	card.setSymbolBounds = {x: 0.9227, y: 0.8739, width: 0.12, height: 0.0381, vertical: 'center', horizontal: 'right'};
++	resetSetSymbol();
++	card.watermarkBounds = {x: 0.5214, y: 0.4748, width: 0.38, height: 0.6767};
++	resetWatermark();
++	loadTextOptions({
++		mana: {name: 'Mana Cost', text: '', y: 0.0613, width: 0.9292, height: 71/2100, oneLine: true, size: 71/1638, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0},
++		title: {name: 'Title', text: '', x: 0.0854, y: 0.0522, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0381},
++		type: {name: 'Type', text: '', x: 0.0854, y: 0.8481, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0324},
++		// 0.0305 e o tamanho do pacote, 15% maior que o da carta impressa.
++		level0c: {name: '1 - Text', text: '', x: 0.5093, y: 0.1129, width: 0.404, height: 0.2096, size: 0.0265},
++		level1a: {name: '2 - Cost', text: '', x: 0.5093, y: 0, width: 0.3967, height: 0.0277, size: 0.0277},
++		level1b: {name: '2 - Name', text: '', x: 0.5093, y: 0, width: 0.3967, height: 0.0281, size: 0.0281, align: 'right', font: 'belerenb'},
++		level1c: {name: '2 - Text', text: '', x: 0.5093, y: 0, width: 0.404, height: 0.2091, size: 0.0265},
++		level2a: {name: '3 - Cost', text: '', x: 0.5093, y: 0, width: 0.3967, height: 0.0277, size: 0.0277},
++		level2b: {name: '3 - Name', text: '', x: 0.5093, y: 0, width: 0.3967, height: 0.0281, size: 0.0281, align: 'right', font: 'belerenb'},
++		level2c: {name: '3 - Text', text: '', x: 0.5093, y: 0, width: 0.404, height: 0.2091, size: 0.0265},
++		level3a: {name: '4 - Cost', text: '', x: 0.5093, y: 0, width: 0.3967, height: 0.0277, size: 0.0277},
++		level3b: {name: '4 - Name', text: '', x: 0.5093, y: 0, width: 0.3967, height: 0.0281, size: 0.0281, align: 'right', font: 'belerenb'},
++		level3c: {name: '4 - Text', text: '', x: 0.5093, y: 0, width: 0.404, height: 0, size: 0.0265}
++	});
++
++	var properties = cardFrameProperties(colors, mana_cost, type_line, power);
++	var frames = [];
++	if (properties.pinlineRight) {
++		frames.push(makeCaseFrameByLetter(properties.pinlineRight, 'Pinline', true));
++	}
++	frames.push(makeCaseFrameByLetter(properties.pinline, 'Pinline', false));
++	frames.push(makeCaseFrameByLetter(properties.typeTitle, 'Type', false));
++	frames.push(makeCaseFrameByLetter(properties.typeTitle, 'Title', false));
++	if (properties.rulesRight) {
++		frames.push(makeCaseFrameByLetter(properties.rulesRight, 'Text', true));
++	}
++	frames.push(makeCaseFrameByLetter(properties.rules, 'Text', false));
++	if (properties.frameRight) {
++		frames.push(makeCaseFrameByLetter(properties.frameRight, 'Frame', true));
++	}
++	frames.push(makeCaseFrameByLetter(properties.frame, 'Frame', false));
++	frames.push(makeCaseFrameByLetter(properties.frame, 'Border', false));
++
++	card.frames = frames;
++	card.frames.reverse();
++	await card.frames.forEach(item => addFrame([], item));
++	card.frames.reverse();
++}
++/* script-magic-maker: moldura-de-caso */
++// packCase.js so e alcancavel pelo seletor manual de pacote. As bounds e os
++// campos de texto aqui sao os dele; o que se acrescenta e montar a pilha de
++// molduras a partir das cores, como as outras auto*Frame fazem.
++function makeCaseFrameByLetter(letter, mask, maskToRightHalf) {
++	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'A': 'Artifact', 'L': 'Land'};
++	var maskFiles = {
++		'Pinline': '/img/frames/class/pinline.svg',
++		'Title': '/img/frames/m15/regular/m15MaskTitle.png',
++		'Type': '/img/frames/saga/sagaMaskType.png',
++		'Frame': '/img/frames/class/frame.svg',
++		'Text': '/img/frames/class/text.svg',
++		'Text, Right Half': '/img/frames/class/textRight.png',
++		'Border': '/img/frames/class/border.svg'
++	};
++	letter = letter.toUpperCase();
++	// So a caixa de texto tem mascara propria pra metade direita; o resto usa a
++	// generica por cima.
++	var nome = maskToRightHalf && mask == 'Text' ? 'Text, Right Half' : mask;
++	var frame = {
++		name: frameNames[letter] + ' Frame',
++		src: '/img/frames/class/' + letter.toLowerCase() + '.png',
++		masks: [{src: maskFiles[nome], name: nome}]
++	};
++	if (maskToRightHalf && nome == mask) {
++		frame.masks.push({src: '/img/frames/maskRightHalf.png', name: 'Right Half'});
++	}
++	return frame;
++}
++async function autoCaseFrame(colors, mana_cost, type_line, power) {
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	// resetOthers desligado pra nao refazer o rodape: quem escolhe o estilo dele
++	// e quem chamou, antes desta moldura.
++	await resetCardIrregularities({resetOthers: false});
++	card.version = 'case';
++	card.artBounds = {x: 0.0753, y: 0.1124, width: 0.4247, height: 0.7253};
++	autoFitArt();
++	card.setSymbolBounds = {x: 0.9227, y: 0.8739, width: 0.12, height: 0.0381, vertical: 'center', horizontal: 'right'};
++	resetSetSymbol();
++	card.watermarkBounds = {x: 0.5214, y: 0.4748, width: 0.38, height: 0.6767};
++	resetWatermark();
++	// A caixa de regras vira a coluna de capitulos do caso: o texto ja escrito
++	// muda de campo, senao loadTextOptions o descarta junto com o campo antigo.
++	var regras = card.text.rules ? card.text.rules.text : '';
++	loadTextOptions({
++		mana: {name: 'Mana Cost', text: '', y: 0.0613, width: 0.9292, height: 71/2100, oneLine: true, size: 71/1638, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0},
++		title: {name: 'Title', text: '', x: 0.0854, y: 0.0522, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0381},
++		type: {name: 'Type', text: '', x: 0.0854, y: 0.8481, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0324},
++		'case': {name: 'Rules Text', text: '', x: 0.5093, y: 356/2814, width: 0.404, height: 1974/2814, size: 0.03445}
++	});
++	// So quando veio da caixa de regras: numa segunda passada o campo antigo
++	// nao existe mais, e sobrescrever apagaria o texto que ja esta no lugar.
++	if (regras) {
++		card.text['case'].text = regras.replace(/(\r\n|\r|\n)/g, '//{bar}//');
++	}
++
++	var properties = cardFrameProperties(colors, mana_cost, type_line, power);
++	var frames = [];
++	if (properties.pinlineRight) {
++		frames.push(makeCaseFrameByLetter(properties.pinlineRight, 'Pinline', true));
++	}
++	frames.push(makeCaseFrameByLetter(properties.pinline, 'Pinline', false));
++	frames.push(makeCaseFrameByLetter(properties.typeTitle, 'Type', false));
++	frames.push(makeCaseFrameByLetter(properties.typeTitle, 'Title', false));
++	if (properties.rulesRight) {
++		frames.push(makeCaseFrameByLetter(properties.rulesRight, 'Text', true));
++	}
++	frames.push(makeCaseFrameByLetter(properties.rules, 'Text', false));
++	if (properties.frameRight) {
++		frames.push(makeCaseFrameByLetter(properties.frameRight, 'Frame', true));
++	}
++	frames.push(makeCaseFrameByLetter(properties.frame, 'Frame', false));
++	frames.push(makeCaseFrameByLetter(properties.frame, 'Border', false));
++
++	card.frames = frames;
++	card.frames.reverse();
++	await card.frames.forEach(item => addFrame([], item));
++	card.frames.reverse();
++}
+ /* script-magic-maker: moldura-de-saga */
+ // packSagaRegular.js so e alcancavel pelo seletor manual de pacote. As bounds e
+ // os campos de texto aqui sao os dele; o que se acrescenta e montar a pilha de
+@@ -5095,6 +5242,12 @@ function changeCardIndex() {
+ 	rulesText = curlyQuotes(rulesText).replace(/{Q}/g, '{untap}').replace(/{\u221E}/g, "{inf}").replace(/• /g, '• {indent}');
+ 	rulesText = rulesText.replace('(If this card is your chosen companion, you may put it into your hand from outside the game for {3} any time you could cast a sorcery.)', '(If this card is your chosen companion, you may put it into your hand from outside the game for {3} as a sorcery.)')
+ 
++	/* script-magic-maker: marcador-de-secao-fora-do-texto */
++	// So a moldura de classe usa as marcas de secao; nas outras elas sairiam
++	// cruas na caixa de regras.
++	var textoComSecoes = rulesText;
++	rulesText = semMarcadorDeSecao(rulesText);
++
+ 	if (card.text.rules) {
+ 		if (card.version == 'pokemon') {
+ 			if (cardToImport.type_line.toLowerCase().includes('creature')) {
+@@ -5162,6 +5315,9 @@ function changeCardIndex() {
+ 
+ 			
+ 		}
++	/* script-magic-maker: texto-de-classe-por-nivel */
++	} else if (card.text.level0c) {
++		preencherNiveisDeClasse(langFontCode, textoComSecoes);
+ 	} else if (card.text.case) {
+ 		rulesText = rulesText.replace(/(\r\n|\r|\n)/g, '//{bar}//');
+ 		card.text.case.text = langFontCode + rulesText;
+@@ -5620,10 +5776,31 @@ function stretchSVGReal(data, frameObject) {
+ 	});
+ 	return returnData;
+ }
++/* script-magic-maker: texto-de-classe-por-nivel */
++// A moldura de classe nao tem caixa de regras: o texto ja formatado se
++// reparte nos campos de nivel, cortado pelas marcas de secao do Scryfall. A
++// linha logo antes de cada marca traz o custo e o nome do nivel que vem.
++function preencherNiveisDeClasse(prefixo, texto) {
++	var abertura = /^((?:{[^}]+})+):\s*(.+)$/;
++	var blocos = [], cabecalhos = [];
++	texto.split(/\n?\/\/[^\/\n]+\/\/\n?/).forEach(function(parte) {
++		var linhas = parte.split('\n').filter(function(linha) { return linha.trim(); });
++		var achado = linhas.length ? linhas[linhas.length - 1].match(abertura) : null;
++		if (achado) { linhas.pop(); cabecalhos.push(achado); }
++		blocos.push(linhas.join('\n'));
++	});
++	card.text.level0c.text = prefixo + blocos[0];
++	for (var i = 1; i < 4; i++) {
++		var cabecalho = cabecalhos[i - 1];
++		card.text['level' + i + 'a'].text = cabecalho ? cabecalho[1] + ':' : '';
++		card.text['level' + i + 'b'].text = cabecalho ? prefixo + cabecalho[2] : '';
++		card.text['level' + i + 'c'].text = cabecalho ? prefixo + (blocos[i] || '') : '';
++	}
++}
+ /* script-magic-maker: marcador-de-secao-fora-do-texto */
+ // O Scryfall marca em linha propria ("//Level_2//") onde a moldura de classe
+-// separa um nivel do outro. Nao e texto da carta: na moldura normal a linha
+-// apareceria crua na caixa de regras.
++// separa um nivel do outro. Na moldura de classe a marca diz onde cortar; em
++// qualquer outra ela nao e texto da carta e apareceria crua na caixa.
+ function semMarcadorDeSecao(texto) {
+ 	return typeof texto == 'string' ? texto.replace(/^\/\/[^\/\n]+\/\/\r?\n?/gm, '') : texto;
+ }
+@@ -5642,7 +5819,6 @@ function processScryfallCard(card, responseCards) {
+ 				face.name = face.printed_name;
+ 				face.type_line = face.printed_type_line;
+ 			}
+-			face.oracle_text = semMarcadorDeSecao(face.oracle_text);
+ 			responseCards.push(face);
+ 			if (!face.image_uris) {
+ 				face.image_uris = card.image_uris;
+@@ -5659,7 +5835,6 @@ function processScryfallCard(card, responseCards) {
+ 			card.name = card.printed_name;
+ 			card.type_line = card.printed_type_line;
+ 		}
+-		card.oracle_text = semMarcadorDeSecao(card.oracle_text);
+ 		responseCards.push(card);
+ 	}
+ }
+diff --git a/creator/index.html b/creator/index.html
+index 498ff40..dc52369 100644
+--- a/creator/index.html
++++ b/creator/index.html
+@@ -727,6 +727,10 @@
+ 							<option value="TextlessBasicsBorderless">Fullart Basic Land (Borderless)</option>
+ 							<!-- script-magic-maker: moldura-de-saga -->
+ 							<option value="SagaRegular">Saga</option>
++							<!-- script-magic-maker: moldura-de-caso -->
++							<option value="Case">Case</option>
++							<!-- script-magic-maker: moldura-de-classe -->
++							<option value="Class">Class</option>
+ 							<option value="UBNew">Universes Beyond (Accurate)</option>
+ 
+ 							<option disabled>Custom frames</option>
