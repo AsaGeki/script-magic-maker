@@ -21,6 +21,7 @@ import html
 import logging
 import re
 from io import BytesIO
+from math import log
 
 import httpx
 from PIL import Image, ImageChops, UnidentifiedImageError
@@ -53,8 +54,14 @@ _TITULO = re.compile(r"<title>(.*?)\s*-\s*mtgpics\.com</title>", re.IGNORECASE |
 _REF_DO_RESULTADO = re.compile(r"card\?ref=([a-z0-9]+)", re.IGNORECASE)
 
 
-async def buscar(carta: ScryfallCard) -> str | None:
-    """Data URL com a maior arte disponivel pra esta impressao, ou None."""
+async def buscar(carta: ScryfallCard, aspecto_da_janela: float | None = None) -> str | None:
+    """Data URL com a melhor arte disponivel pra esta impressao, ou None.
+
+    `aspecto_da_janela` e largura/altura da janela de arte da moldura escolhida.
+    Com ele, uma arte de formato muito diferente perde pro art_crop mesmo sendo
+    maior: o gerador preenche a janela e corta o resto, entao arte torta vira
+    arte cortada.
+    """
     async with httpx.AsyncClient(
         timeout=TIMEOUT, follow_redirects=True, headers=CABECALHOS
     ) as client:
@@ -65,11 +72,58 @@ async def buscar(carta: ScryfallCard) -> str | None:
         arte = await _melhor_do_mtgpics(client, carta, referencia)
         if arte is not None:
             arte = _sem_carimbo(arte)
-        # O MTGPics costuma ter a arte maior, mas nao sempre - em algumas
-        # edicoes recentes o que ele guarda e menor que o recorte do Scryfall.
-        if arte is None or _pixels(arte) <= _pixels(referencia):
+        if arte is None or not _vale_a_pena(arte, referencia, aspecto_da_janela, carta):
             arte = referencia
         return _data_url(arte)
+
+
+# Quanto o formato do MTGPics pode se afastar do da janela, alem do que o
+# art_crop ja se afasta, antes de perder pra ele. Em log, entao 0.25 e um lado
+# ~28% fora do esperado: abaixo disso o corte tira pouco e a arte do MTGPics
+# ainda compensa por trazer varias vezes mais pixels.
+FOLGA_DE_ASPECTO = 0.25
+
+
+def _aspecto(imagem: bytes) -> float | None:
+    try:
+        aberta = Image.open(BytesIO(imagem))
+    except (UnidentifiedImageError, OSError):
+        return None
+    return aberta.width / aberta.height if aberta.height else None
+
+
+def _distancia_do_aspecto(imagem: bytes, janela: float) -> float | None:
+    """O quanto o formato da imagem se afasta do da janela, sem lado preferido:
+    metade e o dobro da largura pesam igual."""
+    aspecto = _aspecto(imagem)
+    if aspecto is None or aspecto <= 0:
+        return None
+    return abs(log(aspecto / janela))
+
+
+def _vale_a_pena(
+    arte: bytes, referencia: bytes, janela: float | None, carta: ScryfallCard
+) -> bool:
+    """Se a arte do MTGPics ganha do art_crop pra esta moldura."""
+    if janela is not None:
+        do_mtgpics = _distancia_do_aspecto(arte, janela)
+        do_scryfall = _distancia_do_aspecto(referencia, janela)
+        if (
+            do_mtgpics is not None
+            and do_scryfall is not None
+            and do_mtgpics > do_scryfall + FOLGA_DE_ASPECTO
+        ):
+            logger.info(
+                "%s: arte do MTGPics no formato errado pra esta moldura "
+                "(%.2f contra %.2f do art_crop), ficando no art_crop",
+                carta.nome_exibido,
+                do_mtgpics,
+                do_scryfall,
+            )
+            return False
+    # O MTGPics costuma ter a arte maior, mas nao sempre - em algumas edicoes
+    # recentes o que ele guarda e menor que o recorte do Scryfall.
+    return _pixels(arte) > _pixels(referencia)
 
 
 async def _melhor_do_mtgpics(
