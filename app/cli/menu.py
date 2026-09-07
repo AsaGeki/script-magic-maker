@@ -8,6 +8,7 @@ de 1 `asyncio.run()` so, ver main().
 """
 
 import asyncio
+import re
 from pathlib import Path
 
 import pyfiglet
@@ -30,6 +31,7 @@ from app.cards.service import (
     ULTIMA_EDICAO_EM_PORTUGUES,
     completar_moldura_do_ingles,
     completar_traducao_parcial,
+    e_terreno_basico,
     find_card_by_print,
     preferir_traducao_do_arena,
     traduzir_terreno_basico,
@@ -248,17 +250,71 @@ async def _escolher_e_gerar(
 # --- Fluxos de Cartas ------------------------------------------------------
 
 
+# "Nome (SET) 123", "Nome (SET) - 123" ou "Nome (SET)-0123": mesmo par
+# edicao + numero que a lista de deck entende, traco e zero a esquerda
+# opcionais.
+_SUFIXO_EDICAO = re.compile(
+    r"""^
+    (?P<nome>.+?)
+    \s*\(\s*(?P<set>[A-Za-z0-9]{2,6})\s*\)
+    \s*-?\s*
+    (?P<numero>[A-Za-z0-9\-★]+)
+    \s*$
+    """,
+    re.VERBOSE,
+)
+
+
+async def _carta_por_edicao_e_numero(codigo: str, numero: str) -> ScryfallCard | None:
+    """A impressao exata, pelo par edicao + numero de colecionador.
+
+    Terreno basico e carta com muitas variantes nao saem pela busca por nome
+    (Floresta tem centenas de impressoes) nem pela busca por edicao (para nas
+    primeiras 60 cartas da colecao). Aqui o par identifica a impressao sozinho,
+    sem lista nenhuma no meio.
+    """
+    carta = await find_card_by_print(codigo, numero)
+    em_portugues = carta is not None
+    if carta is None:
+        carta = await find_card_by_print(codigo, numero, lang="en")
+
+    if carta is None:
+        console.print(f"  [red]![/] {codigo.upper()} #{numero} nao existe no Scryfall.")
+        return None
+    # Terreno basico nao tem texto pra traduzir - so a arte da impressao
+    # importa, entao a falta de PT aqui nao e perda nenhuma.
+    if not em_portugues and not e_terreno_basico(carta):
+        console.print(
+            f"  [yellow]![/] {codigo.upper()} #{numero} nao tem impressao em "
+            "portugues; seguindo com o texto em ingles."
+        )
+    return carta
+
+
 async def _fluxo_carta_por_nome() -> None:
-    procurado = await questionary.text("Nome da carta (portugues ou ingles):").ask_async()
+    procurado = await questionary.text(
+        'Nome da carta, ou "Nome (EDICAO) - NUMERO" pra uma impressao exata:'
+    ).ask_async()
     if not procurado:
+        return
+    procurado = procurado.strip()
+
+    casamento = _SUFIXO_EDICAO.match(procurado)
+    if casamento:
+        codigo, numero = casamento.group("set").lower(), casamento.group("numero")
+        async with cronometrar(console, f"Buscando {codigo.upper()} #{numero}"):
+            carta = await _carta_por_edicao_e_numero(codigo, numero)
+        if carta is None:
+            return
+        await _perguntar_e_gerar(carta)
         return
 
     async with cronometrar(console, "Buscando no Scryfall"):
-        impressoes = await search_cards(procurado.strip())
+        impressoes = await search_cards(procurado)
         if not impressoes:
-            impressoes = await search_cards(procurado.strip(), lang="en")
+            impressoes = await search_cards(procurado, lang="en")
         if not impressoes:
-            nomes = await suggest_names(procurado.strip())
+            nomes = await suggest_names(procurado)
     if not impressoes:
         if not nomes:
             console.print(f'  [red]![/] Nada encontrado para "{procurado}".')
@@ -297,41 +353,6 @@ async def _fluxo_carta_por_termo() -> None:
     async with cronometrar(console, "Buscando no Scryfall"):
         cartas = await search_cards_by_term(termo.strip())
     await _escolher_e_gerar(cartas)
-
-
-async def _fluxo_carta_por_edicao_e_numero() -> None:
-    """Vai direto na impressao exata, pelo par edicao + numero de colecionador.
-
-    Terreno basico e carta com muitas variantes nao saem pelos outros fluxos:
-    a busca por nome devolve uma pagina do Scryfall (175 impressoes, e
-    "Floresta" tem centenas) e a busca por edicao para nas primeiras 60 cartas
-    da colecao. Aqui o par identifica a impressao sozinho, sem lista nenhuma
-    no meio.
-    """
-    codigo = await questionary.text("Codigo da edicao (ex.: EOE, TDM):").ask_async()
-    if not codigo:
-        return
-    numero = await questionary.text("Numero de colecionador (ex.: 266):").ask_async()
-    if not numero:
-        return
-    codigo, numero = codigo.strip().lower(), numero.strip()
-
-    async with cronometrar(console, f"Buscando {codigo.upper()} #{numero}"):
-        carta = await find_card_by_print(codigo, numero)
-        em_portugues = carta is not None
-        if carta is None:
-            carta = await find_card_by_print(codigo, numero, lang="en")
-
-    if carta is None:
-        console.print(f"  [red]![/] {codigo.upper()} #{numero} nao existe no Scryfall.")
-        return
-    if not em_portugues:
-        console.print(
-            f"  [yellow]![/] {codigo.upper()} #{numero} nao tem impressao em "
-            "portugues; seguindo com o texto em ingles."
-        )
-
-    await _perguntar_e_gerar(carta)
 
 
 async def _fluxo_carta_por_edicao() -> None:
@@ -391,7 +412,6 @@ async def _fluxo_carta_por_edicao() -> None:
 FLUXOS_CARTAS = {
     "Buscar por nome": _fluxo_carta_por_nome,
     "Buscar por termo": _fluxo_carta_por_termo,
-    "Buscar por edicao + numero": _fluxo_carta_por_edicao_e_numero,
     "Escolher por edicao": _fluxo_carta_por_edicao,
 }
 

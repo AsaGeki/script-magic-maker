@@ -13,6 +13,7 @@ from rich.panel import Panel
 from term_image.image import AutoImage
 
 from app.cards.models import ScryfallCard
+from app.cards.service import e_terreno_basico
 from app.config import SCRYFALL_USER_AGENT
 
 console = Console()
@@ -32,8 +33,12 @@ def mostrar_ficha(carta: ScryfallCard) -> None:
         linhas.append(f"Lealdade: {carta.loyalty}")
     if carta.artist:
         linhas.append(f"Arte: {carta.artist}")
+    # Terreno basico nao imprime texto nenhum: o oracle_text ("T: Add G.") e so
+    # a regra do jogo, nunca aparece na carta de papel - mostrar aqui confunde
+    # com uma descricao que a carta nao tem.
+    terreno_basico = e_terreno_basico(carta)
     for face in carta.faces:
-        if face.texto_exibido:
+        if face.texto_exibido and not terreno_basico:
             titulo = f"\n[dim]{face.nome_exibido}[/]\n" if carta.card_faces else "\n"
             linhas.append(f"{titulo}{face.texto_exibido}")
         if face.flavor_text:
