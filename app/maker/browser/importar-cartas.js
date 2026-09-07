@@ -7,12 +7,20 @@
 // processScryfallCard(), entao estes sao os campos finais que changeCardIndex()
 // le, e o proprio site aplica curly quotes, italico de lembrete e formatacao de
 // flavor uma vez so.
+//
+// fetchScryfallData busca por nome com order=released e SEM paginar - so a 1a
+// pagina (175 resultados) do Scryfall. Nome com muitas reimpressoes (terreno
+// basico chega a centenas) pode nao trazer a impressao pedida nela: o id nunca
+// aparece na lista, nenhum remendo abaixo roda, e importCard() desenha o
+// indice 0 - a impressao mais recente do nome, nao a pedida. Buscar o id
+// direto (fetchScryfallCardByID) quando ele faltar cobre esse caso.
 (args) => {
     const { nome, idAlvo, tipoDeReserva, textoDeReserva, tipoTraduzido, textoTraduzido, arenaId, arenaTexto, arenaFlavor, palavrasDeHabilidade } = args;
     // Lista do MTGJSON (ver app.cards.palavras_chave): diz quais palavras antes
     // do travessao saem em italico. Sem ela o changeCardIndex usa a embutida.
     window.palavrasDeHabilidade = palavrasDeHabilidade || [];
-    fetchScryfallData(nome, (cards) => {
+
+    const prosseguir = (cards) => {
         cards.forEach((c) => {
             if (!c.type_line || c.type_line === 'Card') {
                 c.type_line = tipoDeReserva;
@@ -41,5 +49,13 @@
             cards.unshift(alvo);
         }
         importCard(cards);
+    };
+
+    fetchScryfallData(nome, (cards) => {
+        if (cards.some((c) => c.id === idAlvo)) {
+            prosseguir(cards);
+            return;
+        }
+        fetchScryfallCardByID(idAlvo, (achada) => prosseguir(achada.concat(cards)));
     }, 'prints');
 }
