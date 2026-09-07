@@ -31,6 +31,7 @@ from app.cards.service import (
     ULTIMA_EDICAO_EM_PORTUGUES,
     completar_moldura_do_ingles,
     completar_traducao_parcial,
+    completar_traducao_pos_corte,
     e_terreno_basico,
     find_card_by_print,
     preferir_traducao_do_arena,
@@ -227,6 +228,7 @@ async def _escolher_e_gerar(
         return []
     for carta in cartas:
         await traduzir_terreno_basico(carta)
+        await completar_traducao_pos_corte(carta)
         await completar_traducao_parcial(carta)
         await completar_moldura_do_ingles(carta)
     _mostrar_tabela(cartas)
@@ -333,6 +335,7 @@ async def _perguntar_e_gerar(carta: ScryfallCard) -> None:
     """Ficha na tela, escolha de texto e de moldura, e geracao - o rabo comum
     de todo fluxo que termina numa impressao unica ja decidida."""
     await traduzir_terreno_basico(carta)
+    await completar_traducao_pos_corte(carta)
     await completar_traducao_parcial(carta)
     await completar_moldura_do_ingles(carta)
     mostrar_ficha(carta)

@@ -300,12 +300,28 @@ def _texto_traduzido(carta: ScryfallCard) -> str | None:
     """Texto de regras a impor na impressao em ingles, ou None pra deixar o que
     o Scryfall trouxer.
 
-    So terreno basico impoe: o lembrete em ingles do oracle_text nao existe na
-    carta de papel.
+    Terreno basico impoe vazio: o lembrete em ingles do oracle_text nao existe
+    na carta de papel. Carta comum sem PT nenhum impoe o texto emprestado de
+    uma irma (ver completar_traducao_pos_corte) quando ele existir.
     """
-    if carta.lang == "en" and e_terreno_basico(carta):
+    if carta.lang != "en":
+        return None
+    if e_terreno_basico(carta):
         return ""
-    return None
+    return carta.printed_text
+
+
+def _flavor_traduzido(carta: ScryfallCard) -> str | None:
+    """Historia a impor na impressao em ingles, ou None pra deixar a do
+    Scryfall.
+
+    A impressao em ingles chega com a historia em ingles, e o import le esse
+    campo direto. Quando a traducao veio emprestada de uma irma,
+    completar_traducao_pos_corte ja trocou o campo pela versao em portugues.
+    """
+    if carta.lang != "en" or not carta.printed_name:
+        return None
+    return carta.flavor_text
 
 
 async def _filtrar_rede(rota: Route) -> None:
@@ -817,6 +833,7 @@ async def _preencher(
                     carta.printed_type_line if carta.lang == "en" else None
                 ),
                 "textoTraduzido": _texto_traduzido(carta),
+                "flavorTraduzido": _flavor_traduzido(carta),
                 "palavrasDeHabilidade": list(palavras_de_habilidade()),
                 "arenaId": carta.id if usar_arena else None,
                 "arenaTexto": carta.arena.texto if usar_arena else None,

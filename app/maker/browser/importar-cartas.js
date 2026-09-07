@@ -15,7 +15,7 @@
 // indice 0 - a impressao mais recente do nome, nao a pedida. Buscar o id
 // direto (fetchScryfallCardByID) quando ele faltar cobre esse caso.
 (args) => {
-    const { nome, idAlvo, tipoDeReserva, textoDeReserva, tipoTraduzido, textoTraduzido, arenaId, arenaTexto, arenaFlavor, palavrasDeHabilidade } = args;
+    const { nome, idAlvo, tipoDeReserva, textoDeReserva, tipoTraduzido, textoTraduzido, flavorTraduzido, arenaId, arenaTexto, arenaFlavor, palavrasDeHabilidade } = args;
     // Lista do MTGJSON (ver app.cards.palavras_chave): diz quais palavras antes
     // do travessao saem em italico. Sem ela o changeCardIndex usa a embutida.
     window.palavrasDeHabilidade = palavrasDeHabilidade || [];
@@ -29,10 +29,12 @@
                 c.oracle_text = textoDeReserva;
             }
             // Traducao montada fora do Scryfall: a linha de tipo das fichas
-            // (app.cards.fichas) e o texto vazio do terreno basico.
+            // (app.cards.fichas), o texto vazio do terreno basico e o texto e a
+            // historia emprestados de uma irma em portugues.
             if (c.id === idAlvo) {
                 if (tipoTraduzido) c.type_line = tipoTraduzido;
                 if (textoTraduzido !== null) c.oracle_text = textoTraduzido;
+                if (flavorTraduzido) c.flavor_text = flavorTraduzido;
             }
             // O nome fica de fora: importCard() usa c.name pra buscar a arte, e
             // traduzido a busca volta vazia (ver _aplicar_nome_traduzido).

@@ -5,6 +5,7 @@
 import asyncio
 import logging
 import re
+from datetime import date
 from typing import Any
 
 import httpx
@@ -264,6 +265,84 @@ async def traduzir_terreno_basico(carta: ScryfallCard) -> None:
         return
     carta.printed_name = impressoes[0].printed_name
     carta.printed_type_line = impressoes[0].printed_type_line
+
+
+async def completar_traducao_pos_corte(carta: ScryfallCard) -> None:
+    """Poe nome, linha de tipo, regras e historia em portugues numa impressao
+    sem PT nenhum (pos-corte de traducao).
+
+    Prefere o MTG Arena quando ele tiver a impressao exata: acompanha a
+    errata atual, enquanto uma impressao em papel antiga fica congelada no
+    texto de quando saiu. So cai pra irma em PT mais recente quando nem o
+    Arena tiver traducao. So a arte e o resto dos metadados (edicao, numero,
+    artista) ficam da impressao pedida - o rodape mostra eles tal como sao,
+    em ingles, pra dar pra saber ao certo qual impressao esta por tras.
+    Terreno basico fica de fora, que ja tem o proprio caminho mais simples
+    (traduzir_terreno_basico), sem regra nenhuma pra herdar.
+    """
+    if carta.lang != "en" or carta.printed_name or e_terreno_basico(carta):
+        return
+
+    do_arena = preferir_traducao_do_arena(carta)
+    if do_arena:
+        carta.printed_name = carta.arena.nome
+        carta.printed_text = carta.arena.texto
+
+    # Nome vindo do Arena as vezes chega sem o texto (traduzido linha a linha,
+    # ver TraducaoArena) - busca a irma so pro que ainda falta.
+    if not carta.printed_name or not carta.printed_text:
+        async with _cliente() as client:
+            irmas = await _buscar(client, f'!"{carta.name}"', "pt", unique="prints")
+        com_traducao = [irma for irma in irmas if irma.printed_name]
+        if com_traducao:
+            mais_recente = max(com_traducao, key=lambda irma: irma.released_at or date.min)
+            carta.printed_name = carta.printed_name or mais_recente.printed_name
+            carta.printed_text = carta.printed_text or mais_recente.printed_text
+
+    if not carta.printed_name:
+        return
+    if not carta.printed_type_line:
+        async with _cliente() as client:
+            carta.printed_type_line = await _linha_de_tipo_equivalente(client, carta.type_line)
+    if carta.flavor_text:
+        do_arena_flavor = carta.arena.flavor_text if do_arena and carta.arena else None
+        async with _cliente() as client:
+            carta.flavor_text = (
+                do_arena_flavor or await _flavor_equivalente(client, carta) or carta.flavor_text
+            )
+
+
+async def _flavor_equivalente(client: httpx.AsyncClient, carta: ScryfallCard) -> str | None:
+    """A historia em portugues da irma que conta a MESMA historia em ingles.
+
+    Historia e escrita por impressao, nao por carta: cada reimpressao pode
+    trazer outra. Por isso a irma so serve quando o ingles dela bate com o
+    desta impressao - e o ingles vem da impressao irma em ingles, ja que na
+    irma em portugues o campo ja veio traduzido. Sem irma que bata, devolve
+    None e o chamador fica com o ingles.
+    """
+    em_portugues = await _buscar(client, f'!"{carta.name}"', "pt", unique="prints")
+    candidatas = [irma for irma in em_portugues if irma.flavor_text]
+    if not candidatas:
+        return None
+    em_ingles = await _buscar(client, f'!"{carta.name}"', "en", unique="prints")
+    mesma_historia = {
+        (irma.set.lower(), irma.collector_number.lower())
+        for irma in em_ingles
+        if irma.flavor_text == carta.flavor_text
+    }
+    casadas = [
+        irma
+        for irma in candidatas
+        if (irma.set.lower(), irma.collector_number.lower()) in mesma_historia
+    ]
+    if not casadas:
+        logger.info(
+            "%s: nenhuma impressao em portugues conta a mesma historia, deixando a em ingles",
+            carta.nome_exibido,
+        )
+        return None
+    return max(casadas, key=lambda irma: irma.released_at or date.min).flavor_text
 
 
 async def find_card_by_id(card_id: str) -> ScryfallCard:

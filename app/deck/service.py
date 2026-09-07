@@ -5,7 +5,12 @@ Scryfall. Sem nenhum questionary aqui - quem pergunta e o menu (app.cli.menu).
 import logging
 
 from app.cards.models import ScryfallCard
-from app.cards.service import e_terreno_basico, find_card_by_name, find_card_by_print
+from app.cards.service import (
+    completar_traducao_pos_corte,
+    e_terreno_basico,
+    find_card_by_name,
+    find_card_by_print,
+)
 from app.deck.texto import EntradaDeDeck
 from app.errors import AppError
 from app.slug import slug
@@ -80,10 +85,13 @@ def juntar_impressoes_repetidas(cartas: list[ScryfallCard]) -> list[ScryfallCard
 async def _resolver(entrada: EntradaDeDeck, permitir_ingles: bool) -> ScryfallCard:
     """Impressao exata quando a linha traz edicao e numero; senao, pelo nome.
 
-    A impressao pedida pode nao ter PT (ex.: reimpressao em colecao pos-corte
-    de traducao) mesmo quando a carta tem PT em outra edicao. Por isso, antes
-    de aceitar ingles, tenta achar a mesma carta por nome em PT - so cai pro
-    ingles da impressao exata se nem isso existir.
+    A impressao pedida pode nao ter PT nenhum (ex.: colecao pos-corte de
+    traducao). Terreno basico e carta comum aceitam ela mesma assim - a
+    primeira porque so a arte importa, a segunda com nome/tipo/regras
+    emprestados de uma irma em PT (completar_traducao_pos_corte), pra manter a
+    arte pedida em vez de trocar de edicao. So cai pra busca por nome (que
+    pode trazer outra edicao) quando nem a impressao pedida em ingles bate com
+    o que a linha pede.
     """
     if entrada.set and entrada.collector_number:
         carta = await find_card_by_print(entrada.set, entrada.collector_number)
@@ -100,16 +108,20 @@ async def _resolver(entrada: EntradaDeDeck, permitir_ingles: bool) -> ScryfallCa
             )
         else:
             carta_en = await find_card_by_print(entrada.set, entrada.collector_number, lang="en")
-            if (
-                carta_en is not None
-                and e_terreno_basico(carta_en)
-                and _e_o_terreno_basico_pedido(entrada.nome, carta_en)
-            ):
-                # Terreno basico: so a arte da impressao pedida importa. O nome
-                # definitivo (em PT) vem depois de qualquer irma via
-                # traduzir_terreno_basico - aqui so a cor precisa bater.
-                return carta_en
-            valida = carta_en is not None and _e_a_carta_da_linha(entrada.nome, carta_en)
+            if carta_en is not None and e_terreno_basico(carta_en):
+                if _e_o_terreno_basico_pedido(entrada.nome, carta_en):
+                    # Terreno basico: so a arte da impressao pedida importa. O
+                    # nome definitivo (em PT) vem depois de qualquer irma via
+                    # traduzir_terreno_basico - aqui so a cor precisa bater.
+                    return carta_en
+            elif carta_en is not None:
+                # Carta comum sem PT nenhum na impressao pedida: pega nome,
+                # tipo e regras da irma PT mais recente e mantem a arte e o
+                # resto dos metadados da impressao pedida (ver
+                # completar_traducao_pos_corte).
+                await completar_traducao_pos_corte(carta_en)
+                if _e_a_carta_da_linha(entrada.nome, carta_en):
+                    return carta_en
             logger.info(
                 '"%s": impressao %s #%s nao encontrada em PT, procurando a carta '
                 "em outra edicao antes de cair pro ingles",
@@ -121,7 +133,7 @@ async def _resolver(entrada: EntradaDeDeck, permitir_ingles: bool) -> ScryfallCa
                 return await find_card_by_name(entrada.nome, permitir_ingles=False)
             except AppError:
                 pass
-            if permitir_ingles and valida:
+            if permitir_ingles and carta_en is not None and _e_a_carta_da_linha(entrada.nome, carta_en):
                 return carta_en
 
     return await find_card_by_name(entrada.nome, permitir_ingles=permitir_ingles)
