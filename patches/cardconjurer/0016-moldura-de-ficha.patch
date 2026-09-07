@@ -1,0 +1,139 @@
+diff --git a/creator/index.html b/creator/index.html
+index abbca82..f044050 100644
+--- a/creator/index.html
++++ b/creator/index.html
+@@ -739,6 +739,8 @@
+ 							<option value="Flip">Flip</option>
+ 							<!-- script-magic-maker: moldura-dividida -->
+ 							<option value="Split">Split</option>
++							<!-- script-magic-maker: moldura-de-ficha -->
++							<option value="TokenRegular-1">Token</option>
+ 							<option value="UBNew">Universes Beyond (Accurate)</option>
+ 
+ 							<option disabled>Custom frames</option>
+diff --git a/js/creator-23.js b/js/creator-23.js
+index c5daf53..4b199c5 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -915,6 +915,10 @@ function autoFrame() {
+ 	} else if (frame == 'Split') {
+ 		group = 'Standard-3';
+ 		autoSplitFrame(colors, card.text.mana.text, card.text.type.text, '');
++	/* script-magic-maker: moldura-de-ficha */
++	} else if (frame == 'TokenRegular-1') {
++		group = 'Token-2';
++		autoTokenRegularFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '');
+ 	}
+ 
+ 	if (autoFramePack != frame) {
+@@ -922,6 +926,94 @@ function autoFrame() {
+ 		autoFramePack = frame;
+ 	}
+ }
++/* script-magic-maker: moldura-de-ficha */
++// packTokenRegular-1.js so e alcancavel pelo seletor manual de pacote. A ficha
++// impressa nao tem janela de arte: a arte vai de borda a borda, do topo ate a
++// linha de tipo, o nome sai centralizado em branco sobre ela e a caixa de
++// regras e uma faixa baixa. A moldura de criatura comum, que era o que caia
++// aqui, emoldura a arte e alinha o nome a esquerda.
++//
++// O pacote tem uma imagem por cor e recorta as partes dela por mascara, entao
++// cada parte entra como uma camada com UMA mascara so - mascara sobre mascara
++// se cruza, e as seis juntas nao sobrariam nada.
++var MASCARAS_DA_FICHA = [
++	{src: '/img/frames/token/regular/bevel.svg', name: 'Bevel'},
++	{src: '/img/frames/token/tokenMaskRegularPinline.png', name: 'Pinline'},
++	{src: '/img/frames/m15/regular/m15MaskTitle.png', name: 'Title'},
++	{src: '/img/frames/token/tokenMaskRegularType.png', name: 'Type'},
++	{src: '/img/frames/token/tokenMaskRegularRules.png', name: 'Rules'},
++	{src: '/img/frames/m15/regular/m15MaskBorder.png', name: 'Border'}
++];
++// Janela de arte medida na ficha impressa (LCC #10): de borda a borda, parando
++// na linha de tipo. A do pacote desce por tras da caixa de regras, que na
++// imagem dele e translucida - a caixa da ficha impressa e opaca.
++var ARTE_DA_FICHA = {x: 0.045, y: 0.028, width: 0.917, height: 0.647};
++function makeTokenRegularFrameByLetter(letter, mascara) {
++	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'A': 'Artifact', 'L': 'Land', 'C': 'Colorless'};
++	var frameFiles = {'W': 'tokenFrameWRegular', 'U': 'tokenFrameURegular', 'B': 'tokenFrameBRegular', 'R': 'tokenFrameRRegular', 'G': 'tokenFrameGRegular', 'M': 'tokenFrameMRegular', 'A': 'tokenFrameARegular', 'L': 'tokenFrameLRegular', 'C': 'frameC'};
++	return {
++		name: frameNames[letter] + ' ' + mascara.name,
++		src: '/img/frames/token/regular/' + frameFiles[letter] + '.png',
++		masks: [mascara]
++	};
++}
++async function autoTokenRegularFrame(colors, mana_cost, type_line, power) {
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	var letter = 'C';
++	if (type_line.includes('Land')) {
++		letter = 'L';
++	} else if (colors.length > 1) {
++		letter = 'M';
++	} else if (colors.length == 1) {
++		letter = colors[0].toUpperCase();
++	} else if (type_line.includes('Artifact')) {
++		letter = 'A';
++	}
++
++	await resetCardIrregularities({resetOthers: false});
++	card.version = 'tokenRegular';
++	card.artBounds = ARTE_DA_FICHA;
++	autoFitArt();
++	card.setSymbolBounds = {x: 0.9213, y: 0.6743, width: 0.12, height: 0.0410, vertical: 'center', horizontal: 'right'};
++	resetSetSymbol();
++	card.watermarkBounds = {x: 0.5, y: 0.8177, width: 0.75, height: 0.1472};
++	resetWatermark();
++	loadTextOptions({
++		mana: {name: 'Mana Cost', text: '', y: 0.0613, width: 0.9292, height: 71/2100, oneLine: true, size: 71/1638, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0},
++		title: {name: 'Title', text: '', x: 0.0854, y: 0.0522, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenbsc', size: 0.0381, color: 'white', align: 'center'},
++		type: {name: 'Type', text: '', x: 0.0854, y: 0.65, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0324},
++		rules: {name: 'Rules Text', text: '', x: 0.086, y: 0.7143, width: 0.828, height: 0.2048, size: 0.0362},
++		pt: {name: 'Power/Toughness', text: '', x: 0.7928, y: 0.902, width: 0.1367, height: 0.0372, size: 0.0372, font: 'belerenbsc', oneLine: true, align: 'center'}
++	});
++
++	var frames = [];
++	// A caixa de poder/resistencia so existe em ficha de criatura, e nao tem
++	// versao de terreno no catalogo.
++	if (power) {
++		frames.push({
++			name: 'Power/Toughness',
++			src: '/img/frames/m15/regular/m15PT' + (letter == 'L' ? 'C' : letter) + '.png',
++			masks: [],
++			bounds: {x: 0.7573, y: 0.8848, width: 0.188, height: 0.0733}
++		});
++	}
++	MASCARAS_DA_FICHA.forEach(mascara => frames.push(makeTokenRegularFrameByLetter(letter, mascara)));
++	// Fundo branco so na caixa de regras: sem a arte por tras, a imagem do
++	// pacote deixaria o preto da carta passar pelos 20% que falta nela.
++	frames.push({
++		name: 'Rules Backing',
++		src: '/img/black.png',
++		masks: [MASCARAS_DA_FICHA[4]],
++		hslLightness: 100
++	});
++
++	card.frames = frames;
++	card.frames.reverse();
++	await card.frames.forEach(item => addFrame([], item));
++	card.frames.reverse();
++}
+ /* script-magic-maker: moldura-dividida */
+ // packSplit.js so e alcancavel pelo seletor manual de pacote. A carta e lida
+ // deitada e tem duas metades completas, cada uma com nome, custo, tipo e
+@@ -5721,6 +5813,15 @@ function changeCardIndex() {
+ 				// colecao que a criou ("M20"). O parent_set_code diz qual e.
+ 				if (setObject.set_type == 'token' && setObject.parent_set_code) {
+ 					document.querySelector('#info-set').value = setObject.parent_set_code.toUpperCase();
++					/* script-magic-maker: simbolo-da-colecao-mae-na-ficha */
++					// O simbolo tambem e o da colecao mae: nao existe svg de "tlcc". O
++					// campo do simbolo e outro, e ja foi preenchido com o codigo da
++					// ficha antes desta resposta chegar - trocar pede buscar de novo.
++					var campoDoSimbolo = document.querySelector('#set-symbol-code');
++					if (campoDoSimbolo && !document.querySelector('#lockSetSymbolCode').checked) {
++						campoDoSimbolo.value = setObject.parent_set_code;
++						fetchSetSymbol();
++					}
+ 				}
+ 				/* script-magic-maker: raridade-p-no-promo-pack */
+ 				// Promo pack numerado dentro da colecao principal imprime "P" no lugar

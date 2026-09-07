@@ -56,6 +56,7 @@ MOLDURAS = {
     "Aventura": "Adventure",
     "Virada": "Flip",
     "Dividida": "Split",
+    "Ficha": "TokenRegular-1",
 }
 
 # Layout cuja moldura propria o autoFrame ja alcanca.
@@ -67,6 +68,7 @@ MOLDURA_DO_LAYOUT = {
     Layout.ADVENTURE: "Aventura",
     Layout.FLIP: "Virada",
     Layout.SPLIT: "Dividida",
+    Layout.TOKEN: "Ficha",
 }
 MOLDURA_PADRAO = "M15Regular-1"
 
