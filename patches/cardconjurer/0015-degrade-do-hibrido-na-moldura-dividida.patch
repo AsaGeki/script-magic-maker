@@ -1,0 +1,71 @@
+diff --git a/img/frames/m15/split/bottomRight.svg b/img/frames/m15/split/bottomRight.svg
+new file mode 100644
+index 0000000..644bf79
+--- /dev/null
++++ b/img/frames/m15/split/bottomRight.svg
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="UTF-8" standalone="no"?>
++<!-- script-magic-maker: degrade-do-hibrido-dividido -->
++<svg width="1500" height="2100" viewBox="0 0 1500 2100" version="1.1" xmlns="http://www.w3.org/2000/svg">
++    <defs>
++        <linearGradient id="degrade" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="1529">
++            <stop offset="0" stop-color="rgb(0,0,0)" stop-opacity="1"/>
++            <stop offset="0.8201" stop-color="rgb(0,0,0)" stop-opacity="1"/>
++            <stop offset="1" stop-color="rgb(0,0,0)" stop-opacity="0"/>
++        </linearGradient>
++    </defs>
++    <rect x="0" y="0" width="1500" height="1529" fill="url(#degrade)"/>
++</svg>
+diff --git a/img/frames/m15/split/topRight.svg b/img/frames/m15/split/topRight.svg
+new file mode 100644
+index 0000000..4be302b
+--- /dev/null
++++ b/img/frames/m15/split/topRight.svg
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="UTF-8" standalone="no"?>
++<!-- script-magic-maker: degrade-do-hibrido-dividido -->
++<svg width="1500" height="2100" viewBox="0 0 1500 2100" version="1.1" xmlns="http://www.w3.org/2000/svg">
++    <defs>
++        <linearGradient id="degrade" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="620">
++            <stop offset="0" stop-color="rgb(0,0,0)" stop-opacity="1"/>
++            <stop offset="0.5968" stop-color="rgb(0,0,0)" stop-opacity="1"/>
++            <stop offset="1" stop-color="rgb(0,0,0)" stop-opacity="0"/>
++        </linearGradient>
++    </defs>
++    <rect x="0" y="0" width="1500" height="620" fill="url(#degrade)"/>
++</svg>
+diff --git a/js/creator-23.js b/js/creator-23.js
+index c9e5198..c5daf53 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -933,9 +933,11 @@ function makeSplitFrameByLetter(letter, metade, soADireita) {
+ 	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'A': 'Artifact', 'L': 'Land'};
+ 	letter = letter.toUpperCase();
+ 	var masks = [{src: '/img/frames/m15/split/' + metade + '.svg', name: metade == 'top' ? 'Top Half' : 'Bottom Half'}];
+-	// Mascara sobre mascara se cruza: com as duas sobra so o quarto da carta.
++	/* script-magic-maker: degrade-do-hibrido-dividido */
++	// Mascara sobre mascara se cruza: com as duas sobra so a parte da metade
++	// onde a segunda cor entra.
+ 	if (soADireita) {
+-		masks.push({src: '/img/frames/maskRightHalf.png', name: 'Right Half'});
++		masks.push({src: '/img/frames/m15/split/' + metade + 'Right.svg', name: 'Right Half'});
+ 	}
+ 	return {
+ 		name: frameNames[letter] + ' Frame',
+@@ -946,11 +948,11 @@ function makeSplitFrameByLetter(letter, metade, soADireita) {
+ // Cada metade tem custo proprio, entao cor propria. Metade hibrida sai em duas
+ // cores como o autoM15Frame faz: a segunda so na parte direita.
+ //
+-// Na carta impressa esse degrade e DIAGONAL - a metade e lida girada, entao a
+-// segunda cor cobre o topo e a direita e desbota pra base esquerda. O catalogo
+-// nao tem mascara pra isso: as unicas horizontais cortam no meio da carta, que
+-// e justamente a divisa entre as duas metades. O corte reto acerta 4 dos 6
+-// pontos de borda medidos; o inverso acerta 3.
++// A metade e lida girada, entao a direita dela e o lado de CIMA na carta em pe:
++// o degrade corre no eixo vertical, dentro da metade. A maskRightHalf corta no
++// eixo horizontal da carta inteira, que ali e o eixo errado - dai as mascaras
++// proprias topRight.svg e bottomRight.svg, que trocam de cor a 0.44 da metade,
++// como a carta impressa.
+ function molduraDaMetade(custo, metade, frames) {
+ 	var cores = [...new Set((custo.toUpperCase().match(/[WUBRG]/g) || []))];
+ 	if (cores.length == 2 && custo.includes('/')) {
