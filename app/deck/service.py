@@ -5,7 +5,7 @@ Scryfall. Sem nenhum questionary aqui - quem pergunta e o menu (app.cli.menu).
 import logging
 
 from app.cards.models import ScryfallCard
-from app.cards.service import find_card_by_name, find_card_by_print
+from app.cards.service import e_terreno_basico, find_card_by_name, find_card_by_print
 from app.deck.texto import EntradaDeDeck
 from app.errors import AppError
 from app.slug import slug
@@ -99,6 +99,17 @@ async def _resolver(entrada: EntradaDeDeck, permitir_ingles: bool) -> ScryfallCa
                 entrada.nome,
             )
         else:
+            carta_en = await find_card_by_print(entrada.set, entrada.collector_number, lang="en")
+            if (
+                carta_en is not None
+                and e_terreno_basico(carta_en)
+                and _e_o_terreno_basico_pedido(entrada.nome, carta_en)
+            ):
+                # Terreno basico: so a arte da impressao pedida importa. O nome
+                # definitivo (em PT) vem depois de qualquer irma via
+                # traduzir_terreno_basico - aqui so a cor precisa bater.
+                return carta_en
+            valida = carta_en is not None and _e_a_carta_da_linha(entrada.nome, carta_en)
             logger.info(
                 '"%s": impressao %s #%s nao encontrada em PT, procurando a carta '
                 "em outra edicao antes de cair pro ingles",
@@ -110,14 +121,38 @@ async def _resolver(entrada: EntradaDeDeck, permitir_ingles: bool) -> ScryfallCa
                 return await find_card_by_name(entrada.nome, permitir_ingles=False)
             except AppError:
                 pass
-            if permitir_ingles:
-                carta_en = await find_card_by_print(
-                    entrada.set, entrada.collector_number, lang="en"
-                )
-                if carta_en is not None and _e_a_carta_da_linha(entrada.nome, carta_en):
-                    return carta_en
+            if permitir_ingles and valida:
+                return carta_en
 
     return await find_card_by_name(entrada.nome, permitir_ingles=permitir_ingles)
+
+
+# As 5 cores de terreno basico, PT e EN - nome oficial da carta, fixo desde
+# sempre (nao dado que desatualiza, e' vocabulario do jogo).
+_TIPOS_DE_TERRENO_BASICO = {
+    "floresta": "Forest",
+    "forest": "Forest",
+    "ilha": "Island",
+    "island": "Island",
+    "pantano": "Swamp",
+    "swamp": "Swamp",
+    "montanha": "Mountain",
+    "mountain": "Mountain",
+    "planicie": "Plains",
+    "plains": "Plains",
+}
+
+
+def _e_o_terreno_basico_pedido(nome_pedido: str, carta: ScryfallCard) -> bool:
+    """Se a impressao de terreno basico achada e da mesma cor que a linha pede.
+
+    _e_a_carta_da_linha nao serve aqui: carta ainda em ingles ("Forest") contra
+    linha em PT ("Floresta") nunca bate por slug, mesmo sendo a carta certa.
+    Sem checar a cor, edicao ou numero errado na lista (ex.: TDM #281 e Swamp,
+    nao Mountain) sairia com o terreno errado sem aviso nenhum.
+    """
+    esperado = _TIPOS_DE_TERRENO_BASICO.get(slug(nome_pedido))
+    return esperado is not None and slug(esperado) == slug(carta.name)
 
 
 def _e_a_carta_da_linha(nome_pedido: str, carta: ScryfallCard) -> bool:
