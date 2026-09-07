@@ -183,11 +183,13 @@ async def completar_moldura_do_ingles(carta: ScryfallCard) -> None:
 def preferir_traducao_do_arena(carta: ScryfallCard) -> bool:
     """Se vale trocar o texto impresso pelo do MTG Arena nesta carta.
 
-    So quando nao ha portugues NENHUM no Scryfall: assim o corte de traducao e
-    preenchido sem pisar em texto que ja saiu impresso. Nome e regra contam
+    So quando nao ha portugues NENHUM: nem nesta impressao, nem emprestado de
+    uma irma em papel por completar_traducao_pos_corte. Nome e regra contam
     separado porque ficha costuma ter so um dos dois.
     """
-    return not carta.traduzida and bool(carta.arena and (carta.arena.nome or carta.arena.texto))
+    if carta.traduzida or carta.printed_name:
+        return False
+    return bool(carta.arena and (carta.arena.nome or carta.arena.texto))
 
 
 async def completar_traducao_parcial(carta: ScryfallCard) -> None:
@@ -217,7 +219,7 @@ async def completar_traducao_parcial(carta: ScryfallCard) -> None:
                 if not faltando:
                     break
 
-    if carta.printed_type_line or not (carta.traduzida or preferir_traducao_do_arena(carta)):
+    if carta.printed_type_line or not (carta.traduzida or carta.printed_name):
         return
     async with _cliente() as client:
         carta.printed_type_line = await _linha_de_tipo_equivalente(client, carta.type_line)
@@ -271,33 +273,32 @@ async def completar_traducao_pos_corte(carta: ScryfallCard) -> None:
     """Poe nome, linha de tipo, regras e historia em portugues numa impressao
     sem PT nenhum (pos-corte de traducao).
 
-    Prefere o MTG Arena quando ele tiver a impressao exata: acompanha a
-    errata atual, enquanto uma impressao em papel antiga fica congelada no
-    texto de quando saiu. So cai pra irma em PT mais recente quando nem o
-    Arena tiver traducao. So a arte e o resto dos metadados (edicao, numero,
-    artista) ficam da impressao pedida - o rodape mostra eles tal como sao,
-    em ingles, pra dar pra saber ao certo qual impressao esta por tras.
+    Prefere a irma em papel mais recente: e assim que a carta saiu impressa em
+    portugues, com os lembretes entre parenteses e as palavras-chave agrupadas
+    na mesma linha. O MTG Arena entra so quando nao ha irma nenhuma - ele
+    acompanha a errata atual, mas traduz linha a linha, o que troca a ordem dos
+    paragrafos e come lembrete. So a arte e o resto dos metadados (edicao,
+    numero, artista) ficam da impressao pedida - o rodape mostra eles tal como
+    sao, em ingles, pra dar pra saber ao certo qual impressao esta por tras.
     Terreno basico fica de fora, que ja tem o proprio caminho mais simples
     (traduzir_terreno_basico), sem regra nenhuma pra herdar.
     """
     if carta.lang != "en" or carta.printed_name or e_terreno_basico(carta):
         return
 
-    do_arena = preferir_traducao_do_arena(carta)
-    if do_arena:
-        carta.printed_name = carta.arena.nome
-        carta.printed_text = carta.arena.texto
+    async with _cliente() as client:
+        irmas = await _buscar(client, f'!"{carta.name}"', "pt", unique="prints")
+    com_traducao = [irma for irma in irmas if irma.printed_name]
+    if com_traducao:
+        # Nome e texto saem da MESMA irma: o texto de regras repete o nome da
+        # carta, e misturar duas impressoes deixa os dois discordando.
+        mais_recente = max(com_traducao, key=lambda irma: irma.released_at or date.min)
+        carta.printed_name = mais_recente.printed_name
+        carta.printed_text = mais_recente.printed_text
 
-    # Nome vindo do Arena as vezes chega sem o texto (traduzido linha a linha,
-    # ver TraducaoArena) - busca a irma so pro que ainda falta.
-    if not carta.printed_name or not carta.printed_text:
-        async with _cliente() as client:
-            irmas = await _buscar(client, f'!"{carta.name}"', "pt", unique="prints")
-        com_traducao = [irma for irma in irmas if irma.printed_name]
-        if com_traducao:
-            mais_recente = max(com_traducao, key=lambda irma: irma.released_at or date.min)
-            carta.printed_name = carta.printed_name or mais_recente.printed_name
-            carta.printed_text = carta.printed_text or mais_recente.printed_text
+    if carta.arena and (not carta.printed_name or not carta.printed_text):
+        carta.printed_name = carta.printed_name or carta.arena.nome
+        carta.printed_text = carta.printed_text or carta.arena.texto
 
     if not carta.printed_name:
         return
@@ -305,11 +306,10 @@ async def completar_traducao_pos_corte(carta: ScryfallCard) -> None:
         async with _cliente() as client:
             carta.printed_type_line = await _linha_de_tipo_equivalente(client, carta.type_line)
     if carta.flavor_text:
-        do_arena_flavor = carta.arena.flavor_text if do_arena and carta.arena else None
         async with _cliente() as client:
-            carta.flavor_text = (
-                do_arena_flavor or await _flavor_equivalente(client, carta) or carta.flavor_text
-            )
+            equivalente = await _flavor_equivalente(client, carta)
+        do_arena = carta.arena.flavor_text if carta.arena else None
+        carta.flavor_text = equivalente or do_arena or carta.flavor_text
 
 
 async def _flavor_equivalente(client: httpx.AsyncClient, carta: ScryfallCard) -> str | None:
