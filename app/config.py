@@ -35,3 +35,11 @@ ESTRUTURAIS_CACHE_DIR = Path(os.environ.get("ESTRUTURAIS_CACHE_DIR", "vendor/est
 if not ESTRUTURAIS_CACHE_DIR.is_absolute():
     ESTRUTURAIS_CACHE_DIR = RAIZ / ESTRUTURAIS_CACHE_DIR
 ESTRUTURAIS_CACHE_MAX_DIAS = int(os.environ.get("ESTRUTURAIS_CACHE_MAX_DIAS", "14"))
+
+# Acervo completo do MTGJSON (AllPrintings.sqlite), consultado quando o
+# Scryfall limita requisicao. Sao ~650 MB em disco, baixados so na primeira vez
+# que a saida e usada.
+MTGJSON_CACHE_DIR = Path(os.environ.get("MTGJSON_CACHE_DIR", "vendor/mtgjson"))
+if not MTGJSON_CACHE_DIR.is_absolute():
+    MTGJSON_CACHE_DIR = RAIZ / MTGJSON_CACHE_DIR
+MTGJSON_CACHE_MAX_DIAS = int(os.environ.get("MTGJSON_CACHE_MAX_DIAS", "30"))

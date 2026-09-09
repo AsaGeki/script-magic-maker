@@ -76,6 +76,13 @@ deixou sem edição (ver [DECK.md](DECK.md)) e gerar junto as fichas que as
 cartas criam — a quantidade de cada ficha é sempre perguntada, porque a carta
 diz que cria ficha, não quantas você vai querer na mesa.
 
+Uma lista grande estoura o limite de requisições do Scryfall, que passa a
+responder 429. Quando isso acontece, a busca da carta cai pro acervo completo
+do MTGJSON, baixado na hora pra `vendor/mtgjson` (650 MB, uma vez só) e
+consultado em disco — mesma carta, mesma ordem de impressões, sem limite. A
+arte continua vindo da rede, pelo CDN de imagem do Scryfall, que não entra
+nesse limite.
+
 Os demais comandos:
 
 | Comando | O que faz |
@@ -114,7 +121,7 @@ Este projeto não seria possível sem estes serviços e projetos de terceiros:
 
 - **[Scryfall](https://scryfall.com)** — API oficial com os dados de cada carta.
 - **[Card Conjurer](https://github.com/Investigamer/cardconjurer)** — motor de geração da imagem (fork usado aqui, auto-hospedado).
-- **[MTGJSON](https://mtgjson.com)** — índice dos decks pré-construídos oficiais.
+- **[MTGJSON](https://mtgjson.com)** — índice dos decks pré-construídos oficiais e acervo completo de reserva, consultado quando o Scryfall responde 429.
 - **[mtgatool-metadata](https://github.com/mtgatool/mtgatool-metadata)** — banco de tradução PT do MTG Arena (GPL-3.0).
 - **[MTGPics](https://www.mtgpics.com)** — fonte de arte em alta resolução.
 

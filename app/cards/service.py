@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from app.cards import arena
+from app.cards import arena, mtgjson
 from app.cards.models import ScryfallCard
 from app.config import SCRYFALL_USER_AGENT
 from app.errors import NotFoundError, UpstreamError
@@ -82,6 +82,30 @@ async def _buscar(
     return cartas
 
 
+async def _impressoes_por_nome(
+    client: httpx.AsyncClient, nome: str, lang: str, unique: str = "prints"
+) -> list[ScryfallCard]:
+    """As impressoes de um nome exato, do Scryfall ou do MTGJSON.
+
+    O MTGJSON so entra quando o Scryfall nao responde - 429 por limite de
+    requisicao, que uma lista de deck estoura facil, ou falha de rede. E o
+    mesmo acervo em disco, na mesma ordem (ver app.cards.mtgjson).
+
+    Lista vazia continua querendo dizer "nao ha impressao nesse idioma", e nao
+    "nao deu pra procurar": sem o banco pra responder, o erro do Scryfall
+    segue em frente.
+    """
+    try:
+        return await _buscar(client, f'!"{nome}"', lang, unique=unique)
+    except UpstreamError as erro:
+        if not await mtgjson.disponivel():
+            raise
+        logger.warning('"%s": %s Seguindo pelo MTGJSON.', nome, erro.message)
+        impressoes = await mtgjson.impressoes_por_nome(nome, lang)
+        await _enriquecer_com_arena(impressoes)
+        return impressoes
+
+
 async def _enriquecer_com_arena(cartas: list[ScryfallCard]) -> None:
     """Anexa a traducao do Arena quando existir.
 
@@ -117,11 +141,11 @@ async def find_card_by_name(nome: str, permitir_ingles: bool = False) -> Scryfal
     falso, pra que o CLI possa perguntar o que fazer.
     """
     async with _cliente() as client:
-        impressoes = await _buscar(client, f'!"{nome}"', "pt")
+        impressoes = await _impressoes_por_nome(client, nome, "pt")
         if impressoes:
             return impressoes[0]
 
-        em_ingles = await _buscar(client, f'!"{nome}"', "en")
+        em_ingles = await _impressoes_por_nome(client, nome, "en")
         if not em_ingles:
             raise NotFoundError(f'Carta "{nome}" nao encontrada no Scryfall')
         if not permitir_ingles:
@@ -135,17 +159,33 @@ async def find_card_by_name(nome: str, permitir_ingles: bool = False) -> Scryfal
 async def find_card_by_print(
     codigo_da_edicao: str, numero: str, lang: str = "pt"
 ) -> ScryfallCard | None:
-    """A impressao exata, quando a lista de deck diz a edicao e o numero."""
+    """A impressao exata, quando a lista de deck diz a edicao e o numero.
+
+    None tanto quando a impressao nao existe naquele idioma quanto quando ela
+    nao esta no MTGJSON depois de o Scryfall falhar: quem chamou trata os dois
+    do mesmo jeito, procurando a carta por outro caminho.
+    """
     async with _cliente() as client:
-        resposta = await _get(client, f"/cards/{codigo_da_edicao.lower()}/{numero}/{lang}")
-        if resposta.status_code == 404:
-            return None
-        if resposta.status_code != 200:
-            raise UpstreamError(
-                f"O Scryfall respondeu {resposta.status_code} para "
-                f"{codigo_da_edicao.upper()} #{numero}."
+        try:
+            resposta = await _get(client, f"/cards/{codigo_da_edicao.lower()}/{numero}/{lang}")
+            if resposta.status_code == 404:
+                return None
+            if resposta.status_code != 200:
+                raise UpstreamError(f"O Scryfall respondeu {resposta.status_code}.")
+        except UpstreamError as erro:
+            if not await mtgjson.disponivel():
+                raise
+            logger.warning(
+                "%s #%s: %s Seguindo pelo MTGJSON.",
+                codigo_da_edicao.upper(),
+                numero,
+                erro.message,
             )
-        carta = ScryfallCard.model_validate(resposta.json())
+            carta = await mtgjson.impressao_exata(codigo_da_edicao, numero, lang)
+        else:
+            carta = ScryfallCard.model_validate(resposta.json())
+        if carta is None:
+            return None
         await _enriquecer_com_arena([carta])
         return carta
 
@@ -210,7 +250,7 @@ async def completar_traducao_parcial(carta: ScryfallCard) -> None:
         ]
         if faltando:
             async with _cliente() as client:
-                irmas = await _buscar(client, f'!"{carta.name}"', "pt", unique="prints")
+                irmas = await _impressoes_por_nome(client, carta.name, "pt")
             for irma in irmas:
                 for campo in list(faltando):
                     if valor := getattr(irma, campo):
@@ -242,7 +282,11 @@ async def _linha_de_tipo_equivalente(
     if not palavras:
         return None
     consulta = " ".join(f't:"{palavra}"' for palavra in palavras)
-    for candidata in await _buscar(client, consulta, "pt", unique="cards"):
+    try:
+        candidatas = await _buscar(client, consulta, "pt", unique="cards")
+    except UpstreamError:
+        return await mtgjson.linha_de_tipo_equivalente(em_ingles)
+    for candidata in candidatas:
         if candidata.type_line == em_ingles and candidata.printed_type_line:
             return candidata.printed_type_line
     return None
@@ -262,7 +306,7 @@ async def traduzir_terreno_basico(carta: ScryfallCard) -> None:
     if carta.printed_name or carta.traduzida or not e_terreno_basico(carta):
         return
     async with _cliente() as client:
-        impressoes = await _buscar(client, f'!"{carta.name}"', "pt", unique="cards")
+        impressoes = await _impressoes_por_nome(client, carta.name, "pt", unique="cards")
     if not impressoes or not impressoes[0].printed_name:
         return
     carta.printed_name = impressoes[0].printed_name
@@ -287,7 +331,7 @@ async def completar_traducao_pos_corte(carta: ScryfallCard) -> None:
         return
 
     async with _cliente() as client:
-        irmas = await _buscar(client, f'!"{carta.name}"', "pt", unique="prints")
+        irmas = await _impressoes_por_nome(client, carta.name, "pt")
     com_traducao = [irma for irma in irmas if irma.printed_name]
     if com_traducao:
         # Nome e texto saem da MESMA irma: o texto de regras repete o nome da
@@ -321,11 +365,11 @@ async def _flavor_equivalente(client: httpx.AsyncClient, carta: ScryfallCard) ->
     irma em portugues o campo ja veio traduzido. Sem irma que bata, devolve
     None e o chamador fica com o ingles.
     """
-    em_portugues = await _buscar(client, f'!"{carta.name}"', "pt", unique="prints")
+    em_portugues = await _impressoes_por_nome(client, carta.name, "pt")
     candidatas = [irma for irma in em_portugues if irma.flavor_text]
     if not candidatas:
         return None
-    em_ingles = await _buscar(client, f'!"{carta.name}"', "en", unique="prints")
+    em_ingles = await _impressoes_por_nome(client, carta.name, "en")
     mesma_historia = {
         (irma.set.lower(), irma.collector_number.lower())
         for irma in em_ingles
