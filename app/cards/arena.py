@@ -100,6 +100,10 @@ def _construir_indice(banco_pt: dict) -> dict[tuple[str, str], dict]:
     O campo `Set` e o codigo interno do Arena; o mapeamento pro do Scryfall
     vive em `sets[nome]['scryfall']`. Carta rebalanceada do Alchemy
     (IsDigitalOnly) fica de fora: nao tem impressao em papel que bata.
+
+    Carta de duas faces vem como duas entradas com o mesmo numero, e quem
+    nomeia a impressao e a frente (`IsPrimaryCard`) - sem isso a de tras entra
+    por ultimo e a carta sai com o nome do verso na frente.
     """
     codigo_para_scryfall = {
         info["code"]: info["scryfall"]
@@ -111,8 +115,11 @@ def _construir_indice(banco_pt: dict) -> dict[tuple[str, str], dict]:
         if carta.get("IsDigitalOnly") or not carta.get("CollectorNumber"):
             continue
         chave = _onde_mora_no_scryfall(carta, codigo_para_scryfall)
-        if chave is not None:
-            indice[chave] = carta
+        if chave is None:
+            continue
+        if chave in indice and not carta.get("IsPrimaryCard"):
+            continue
+        indice[chave] = carta
     return indice
 
 
