@@ -64,7 +64,6 @@ from app.maker.service import (
     moldura_sugerida,
 )
 from app.deck import legalidade
-from app.print import ficha_tecnica
 from app.print import layout
 from app.print import pdf as print_pdf
 from app.print import verso
@@ -524,11 +523,13 @@ async def _finalizar_fluxo_deck(cartas: list[ScryfallCard], nome_do_deck: str, p
         f"Montar o PDF agora, com as {total} copias que o deck pede?", default=True
     ).ask_async():
         async with cronometrar(console, "Montando o PDF"):
-            folhas = montar_lote(repetir_por_copias(geradas))
-            folhas.append(ficha_tecnica.desenhar_ficha(analise, nome_do_deck))
-            destino = print_pdf.exportar_pdf(folhas, f"{nome_do_deck}.pdf")
+            # So folha de carta: o PDF vai inteiro pra impressora, e pagina de
+            # texto no fim vira papel gasto. As modalidades ficam no
+            # metadata.txt da pasta do deck.
+            destino = print_pdf.exportar_pdf(
+                montar_lote(repetir_por_copias(geradas)), f"{nome_do_deck}.pdf"
+            )
         console.print(f"  [green]OK[/] salvo em [bold]{destino}[/]")
-        console.print("  A ultima pagina do PDF lista as modalidades e as cartas que travam.")
 
 
 def _mostrar_modalidades(analise: legalidade.AnaliseDoDeck) -> None:

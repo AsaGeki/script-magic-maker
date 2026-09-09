@@ -92,7 +92,8 @@ Cada pasta de deck ganha um `metadata.txt` com as cópias de cada carta, em quai
 modalidades o deck pode entrar (Standard, Pioneer, Modern, Legacy, Vintage,
 Pauper e Commander) e quais cartas travam cada uma. A legalidade por carta vem
 do Scryfall; o tamanho do deck, o limite de cópias e o singleton do Commander
-são conferidos aqui. Essa mesma leitura vira a última página do PDF do deck.
+são conferidos aqui. O PDF do deck traz só folha de carta: ele vai inteiro pra
+impressora, então página de texto no fim seria papel gasto.
 
 Nenhuma variável em `.env` é obrigatória — `PORT`, `OUTPUT_DIR`, `HEADLESS`,
 `CARDCONJURER_DIR`, `CARDCONJURER_PORT` e `SCRYFALL_USER_AGENT` já têm default.
