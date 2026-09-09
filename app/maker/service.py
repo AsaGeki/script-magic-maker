@@ -59,6 +59,9 @@ MOLDURAS = {
     "Ficha": "TokenRegular-1",
 }
 
+# O caminho de volta: da moldura escolhida pro rotulo que o menu mostra.
+NOME_DA_MOLDURA = {codigo: nome for nome, codigo in MOLDURAS.items()}
+
 # Layout cuja moldura propria o autoFrame ja alcanca.
 MOLDURA_DO_LAYOUT = {
     Layout.SAGA: "Saga",
@@ -114,6 +117,17 @@ def moldura_sugerida(carta: ScryfallCard) -> str:
         return MOLDURAS["Seventh Edition"]
     # frame "1993" e "future" nao tem equivalente no catalogo.
     return MOLDURA_PADRAO
+
+
+def nome_da_moldura(carta: ScryfallCard) -> str:
+    """Como chamar a moldura desta impressao na tela.
+
+    O mesmo criterio de moldura_sugerida, so que devolvendo o rotulo em vez do
+    codigo do autoFrame - e' o que separa uma impressao da outra na hora de
+    escolher entre varias.
+    """
+    codigo = moldura_sugerida(carta)
+    return NOME_DA_MOLDURA.get(codigo, codigo)
 
 
 # Rodando local, moldura e simbolo vem do disco; so estes hosts precisam sair

@@ -42,7 +42,7 @@ from app.cards.service import (
     search_cards_by_term,
     suggest_names,
 )
-from app.cli.preview import escolher_impressao, mostrar_ficha
+from app.cli.preview import descrever_impressao, escolher_impressao, mostrar_ficha
 from app.cli.stdio import configurar_stdio_utf8
 from app.cli.tempo import cronometrar
 from app.config import CARDCONJURER_URL, HEADLESS, OUTPUT_DIR
@@ -62,6 +62,7 @@ from app.maker.service import (
     PASTA_CARTAS_AVULSAS,
     fill_card,
     moldura_sugerida,
+    nome_da_moldura,
 )
 from app.deck import legalidade
 from app.print import layout
@@ -105,6 +106,8 @@ def _mostrar_tabela(cartas: list[ScryfallCard]) -> None:
     tabela.add_column("Nome")
     tabela.add_column("Tipo")
     tabela.add_column("Edicao")
+    tabela.add_column("Ano")
+    tabela.add_column("Moldura")
     tabela.add_column("PT")
     for carta in cartas:
         pt = "[green]sim[/]" if carta.traduzida else "[red]nao[/]"
@@ -112,6 +115,8 @@ def _mostrar_tabela(cartas: list[ScryfallCard]) -> None:
             carta.nome_exibido,
             carta.tipo_exibido or "-",
             f"{carta.set.upper()} #{carta.collector_number}",
+            str(carta.released_at.year) if carta.released_at else "-",
+            nome_da_moldura(carta),
             pt,
         )
     console.print(tabela)
@@ -439,7 +444,7 @@ async def _escolher_impressoes(
         "Escolher a impressao de quais cartas?",
         choices=[
             questionary.Choice(
-                f"{carta.nome_exibido} - hoje {carta.set.upper()} #{carta.collector_number}",
+                f"{carta.nome_exibido} - hoje {descrever_impressao(carta)}",
                 chave_da_entrada(entrada),
             )
             for entrada, carta in soltas

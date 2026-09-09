@@ -15,8 +15,25 @@ from term_image.image import AutoImage
 from app.cards.models import ScryfallCard
 from app.cards.service import e_terreno_basico
 from app.config import SCRYFALL_USER_AGENT
+from app.maker.service import nome_da_moldura
 
 console = Console()
+
+
+def descrever_impressao(carta: ScryfallCard) -> str:
+    """Edicao, ano, moldura e ilustrador numa linha.
+
+    Sao os quatro que fazem duas impressoes da mesma carta serem cartas
+    diferentes na mesa: o ano diz de que epoca e' o desenho da moldura, e a
+    moldura diz o que o gerador vai desenhar.
+    """
+    partes = [f"{carta.set.upper()} #{carta.collector_number}"]
+    if carta.released_at:
+        partes.append(str(carta.released_at.year))
+    partes.append(nome_da_moldura(carta))
+    if carta.artist:
+        partes.append(carta.artist)
+    return " · ".join(partes)
 
 
 def mostrar_ficha(carta: ScryfallCard) -> None:
@@ -25,8 +42,12 @@ def mostrar_ficha(carta: ScryfallCard) -> None:
         linhas.append("[red]Sem impressao PT - nome/texto em ingles[/]")
     if carta.mana_cost:
         linhas.append(f"Custo: {carta.mana_cost}")
-    linhas.append(f"Edicao: {carta.set_name} ({carta.set.upper()}) #{carta.collector_number}")
+    ano = f", {carta.released_at.year}" if carta.released_at else ""
+    linhas.append(
+        f"Edicao: {carta.set_name} ({carta.set.upper()}) #{carta.collector_number}{ano}"
+    )
     linhas.append(f"Raridade: {carta.rarity}")
+    linhas.append(f"Moldura: {nome_da_moldura(carta)}")
     if carta.power is not None and carta.toughness is not None:
         linhas.append(f"Poder/Resistencia: {carta.power}/{carta.toughness}")
     if carta.loyalty is not None:
@@ -166,8 +187,7 @@ async def escolher_impressao(impressoes: list[ScryfallCard]) -> ScryfallCard:
         "Qual impressao usar?",
         choices=[
             questionary.Choice(
-                f"{c.set_name} ({c.set.upper()}) #{c.collector_number}"
-                f" - {c.artist or 'sem artista'}",
+                f"{c.set_name} · {descrever_impressao(c)}",
                 c,
             )
             for c in impressoes
