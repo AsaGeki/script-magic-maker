@@ -8,6 +8,7 @@ moldura e compor as camadas. A imagem sai lida direto do `cardCanvas`.
 
 import asyncio
 import base64
+import contextlib
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -361,14 +362,14 @@ async def navegador():
     Pra carta avulsa; quem gera lote abre uma vez e reusa, que e o gargalo de
     velocidade.
     """
-    servidor = ServidorCardConjurer().start()
-    async with async_playwright() as p:
-        navegador_aberto = await p.chromium.launch(headless=HEADLESS)
-        try:
-            yield navegador_aberto
-        finally:
-            await navegador_aberto.close()
-            servidor.stop()
+    with ServidorCardConjurer():
+        async with async_playwright() as p:
+            navegador_aberto = await p.chromium.launch(headless=HEADLESS)
+            try:
+                yield navegador_aberto
+            finally:
+                with contextlib.suppress(Exception):
+                    await navegador_aberto.close()
 
 
 async def abrir_pagina(browser: Browser) -> Page:

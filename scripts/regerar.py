@@ -11,6 +11,7 @@ a linha de tipo em português delas.
 """
 
 import asyncio
+import contextlib
 import sys
 from pathlib import Path
 
@@ -83,31 +84,31 @@ async def main() -> None:
             tarefas.append((pasta, arquivo, carta))
 
     print(f"{len(tarefas)} cartas a regerar", flush=True)
-    servidor = ServidorCardConjurer().start()
-    async with async_playwright() as playwright:
-        navegador = await playwright.chromium.launch(headless=HEADLESS)
-        try:
-            for indice, (pasta, arquivo, carta) in enumerate(tarefas, start=1):
-                try:
-                    await traduzir_terreno_basico(carta)
-                    await completar_traducao_parcial(carta)
-                    await completar_moldura_do_ingles(carta)
-                    await fill_card(
-                        carta,
-                        browser=navegador,
-                        pasta_destino=pasta,
-                        moldura=moldura_sugerida(carta),
-                        preferir_arena=preferir_traducao_do_arena(carta),
-                    )
-                    print(
-                        f"{indice}/{len(tarefas)} OK {pasta.name}/{carta.nome_exibido}",
-                        flush=True,
-                    )
-                except Exception as erro:  # noqa: BLE001 - 1 carta nao derruba o lote
-                    print(f"{indice}/{len(tarefas)} FALHOU {arquivo}: {erro}", flush=True)
-        finally:
-            await navegador.close()
-            servidor.stop()
+    with ServidorCardConjurer():
+        async with async_playwright() as playwright:
+            navegador = await playwright.chromium.launch(headless=HEADLESS)
+            try:
+                for indice, (pasta, arquivo, carta) in enumerate(tarefas, start=1):
+                    try:
+                        await traduzir_terreno_basico(carta)
+                        await completar_traducao_parcial(carta)
+                        await completar_moldura_do_ingles(carta)
+                        await fill_card(
+                            carta,
+                            browser=navegador,
+                            pasta_destino=pasta,
+                            moldura=moldura_sugerida(carta),
+                            preferir_arena=preferir_traducao_do_arena(carta),
+                        )
+                        print(
+                            f"{indice}/{len(tarefas)} OK {pasta.name}/{carta.nome_exibido}",
+                            flush=True,
+                        )
+                    except Exception as erro:  # noqa: BLE001 - 1 carta nao derruba o lote
+                        print(f"{indice}/{len(tarefas)} FALHOU {arquivo}: {erro}", flush=True)
+            finally:
+                with contextlib.suppress(Exception):
+                    await navegador.close()
 
 
 if __name__ == "__main__":

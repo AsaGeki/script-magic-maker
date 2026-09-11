@@ -13,6 +13,7 @@ o metadata.txt com as modalidades e imprime as cartas que ficaram de fora.
 """
 
 import asyncio
+import contextlib
 import sys
 from pathlib import Path
 
@@ -85,33 +86,36 @@ async def main() -> None:
     de_fora: list[str] = []
 
     print(f"{len(cartas)} cartas a gerar em {destino}", flush=True)
-    servidor = ServidorCardConjurer().start()
-    async with async_playwright() as playwright:
-        navegador = await playwright.chromium.launch(headless=HEADLESS)
-        try:
-            for indice, carta in enumerate(cartas, start=1):
-                try:
-                    await traduzir_terreno_basico(carta)
-                    await completar_traducao_parcial(carta)
-                    await completar_moldura_do_ingles(carta)
-                    caminho = await fill_card(
-                        carta,
-                        browser=navegador,
-                        pasta_destino=destino,
-                        moldura=moldura_sugerida(carta),
-                        preferir_arena=preferir_traducao_do_arena(carta),
-                    )
-                    geradas.append((caminho, carta.copias))
-                    print(f"{indice}/{len(cartas)} OK {caminho.name}", flush=True)
-                except AppError as erro:
-                    de_fora.append(f"{carta.nome_exibido}: {erro.message}")
-                    print(f"{indice}/{len(cartas)} RECUSOU {carta.nome_exibido}", flush=True)
-                except Exception as erro:  # noqa: BLE001 - 1 carta nao derruba o lote
-                    de_fora.append(f"{carta.nome_exibido}: {erro}")
-                    print(f"{indice}/{len(cartas)} FALHOU {carta.nome_exibido}: {erro}", flush=True)
-        finally:
-            await navegador.close()
-            servidor.stop()
+    with ServidorCardConjurer():
+        async with async_playwright() as playwright:
+            navegador = await playwright.chromium.launch(headless=HEADLESS)
+            try:
+                for indice, carta in enumerate(cartas, start=1):
+                    try:
+                        await traduzir_terreno_basico(carta)
+                        await completar_traducao_parcial(carta)
+                        await completar_moldura_do_ingles(carta)
+                        caminho = await fill_card(
+                            carta,
+                            browser=navegador,
+                            pasta_destino=destino,
+                            moldura=moldura_sugerida(carta),
+                            preferir_arena=preferir_traducao_do_arena(carta),
+                        )
+                        geradas.append((caminho, carta.copias))
+                        print(f"{indice}/{len(cartas)} OK {caminho.name}", flush=True)
+                    except AppError as erro:
+                        de_fora.append(f"{carta.nome_exibido}: {erro.message}")
+                        print(f"{indice}/{len(cartas)} RECUSOU {carta.nome_exibido}", flush=True)
+                    except Exception as erro:  # noqa: BLE001 - 1 carta nao derruba o lote
+                        de_fora.append(f"{carta.nome_exibido}: {erro}")
+                        print(
+                            f"{indice}/{len(cartas)} FALHOU {carta.nome_exibido}: {erro}",
+                            flush=True,
+                        )
+            finally:
+                with contextlib.suppress(Exception):
+                    await navegador.close()
 
     escrever_metadata(destino, geradas, await legalidade.analisar_deck(cartas))
     print(f"\ngeradas {len(geradas)}, de fora {len(de_fora)}", flush=True)

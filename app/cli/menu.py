@@ -57,7 +57,7 @@ from app.deck.texto import (
     ler_arquivo,
     travar_impressoes,
 )
-from app.errors import AppError
+from app.errors import AppError, BadRequestError, NotFoundError
 from app.maker.service import (
     MOLDURAS,
     PASTA_CARTAS_AVULSAS,
@@ -176,45 +176,77 @@ async def _gerar_varias(
     Retorna (caminho, copias) de cada carta gerada, pro PDF saber quantas vezes
     repetir cada uma na folha."""
     geradas: list[tuple[Path, int]] = []
-    servidor = ServidorCardConjurer().start()
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=HEADLESS)
-        try:
-            for indice, carta in enumerate(cartas, start=1):
-                console.rule(f"{indice}/{len(cartas)}: {carta.nome_exibido}")
-                for tentativa in range(1, TENTATIVAS_POR_CARTA + 1):
-                    try:
-                        destino = await _gerar_uma(
-                            carta,
-                            browser=browser,
-                            confirmar=False,
-                            pasta_destino=pasta_destino,
-                            moldura=moldura,
-                            preferir_arena=preferir_arena,
-                        )
-                        break
-                    except AppError as erro:
-                        console.print(f"  [red]![/] {erro.message}")
-                        destino = None
-                        break
-                    except Exception as erro:  # noqa: BLE001 - Chromium pode
-                        # cair no meio do lote (ver BrowserContext.close); 1
-                        # carta ruim nao pode derrubar as outras 17.
-                        console.print(f"  [red]![/] Erro inesperado: {erro}")
-                        destino = None
-                        if tentativa == TENTATIVAS_POR_CARTA:
-                            break
-                        console.print("  Reabrindo o navegador para tentar de novo...")
-                        with contextlib.suppress(Exception):
-                            await browser.close()
-                        browser = await p.chromium.launch(headless=HEADLESS)
-                if destino is not None:
-                    geradas.append((destino, carta.copias))
-        finally:
-            with contextlib.suppress(Exception):
-                await browser.close()
-            servidor.stop()
+    with ServidorCardConjurer():
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=HEADLESS)
+            try:
+                for indice, carta in enumerate(cartas, start=1):
+                    console.rule(f"{indice}/{len(cartas)}: {carta.nome_exibido}")
+                    destino, browser = await _gerar_com_retentativa(
+                        carta,
+                        p,
+                        browser,
+                        pasta_destino=pasta_destino,
+                        moldura=moldura,
+                        preferir_arena=preferir_arena,
+                    )
+                    if destino is not None:
+                        geradas.append((destino, carta.copias))
+            finally:
+                with contextlib.suppress(Exception):
+                    await browser.close()
     return geradas
+
+
+# Erro que a segunda tentativa nao resolveria: o gerador recusou o layout ou a
+# carta nao existe. O resto - canvas que parou no meio, Chromium que caiu, rede
+# que oscilou - vale tentar de novo.
+ERROS_DEFINITIVOS = (BadRequestError, NotFoundError)
+
+
+async def _gerar_com_retentativa(
+    carta: ScryfallCard,
+    playwright,
+    browser: Browser,
+    *,
+    pasta_destino: Path | None,
+    moldura: str | None,
+    preferir_arena: bool | None,
+) -> tuple[Path | None, Browser]:
+    """Gera a carta, tentando de novo quando a falha e passageira.
+
+    Devolve o caminho salvo (ou None) e o navegador a usar daqui pra frente -
+    quando o Chromium cai, quem segue e o que foi reaberto aqui.
+    """
+    for tentativa in range(1, TENTATIVAS_POR_CARTA + 1):
+        try:
+            destino = await _gerar_uma(
+                carta,
+                browser=browser,
+                confirmar=False,
+                pasta_destino=pasta_destino,
+                moldura=moldura,
+                preferir_arena=preferir_arena,
+            )
+        except Exception as erro:  # noqa: BLE001 - 1 carta ruim nao pode derrubar o lote
+            if isinstance(erro, AppError):
+                console.print(f"  [red]![/] {erro.message}")
+            else:
+                console.print(f"  [red]![/] Erro inesperado: {erro}")
+            if isinstance(erro, ERROS_DEFINITIVOS) or tentativa == TENTATIVAS_POR_CARTA:
+                return None, browser
+            # Falha do proprio gerador se resolve com uma pagina nova, que o
+            # fill_card ja abre; so a queda do Chromium pede navegador novo.
+            if not isinstance(erro, AppError):
+                console.print("  Reabrindo o navegador para tentar de novo...")
+                with contextlib.suppress(Exception):
+                    await browser.close()
+                browser = await playwright.chromium.launch(headless=HEADLESS)
+            else:
+                console.print("  Tentando de novo...")
+        else:
+            return destino, browser
+    return None, browser
 
 
 NOME_DA_MOLDURA = {valor: nome for nome, valor in MOLDURAS.items()}
