@@ -31,7 +31,7 @@ from app.config import (
 from app.errors import BadRequestError, UpstreamError
 from app.maker import arte
 from app.maker.browser import carregar
-from app.slug import slug
+from app.slug import nome_de_arquivo
 from app.vendor.server import ServidorCardConjurer
 
 logger = logging.getLogger(__name__)
@@ -792,11 +792,11 @@ async def _salvar(
 
     pasta = pasta_destino or PASTA_CARTAS_AVULSAS
     pasta.mkdir(parents=True, exist_ok=True)
-    nome_base = f"{carta.nome_exibido}-{carta.set}-{carta.collector_number}"
+    partes = [carta.nome_exibido, carta.set, carta.collector_number]
     # Sem o sufixo, gerar a mesma impressao noutra moldura sobrescreveria.
     if moldura != moldura_sugerida(carta):
-        nome_base += f"-{moldura}"
-    destino = pasta / f"{slug(nome_base)}.png"
+        partes.append(moldura)
+    destino = pasta / f"{nome_de_arquivo(*partes)}.png"
     destino.write_bytes(conteudo)
     return destino
 

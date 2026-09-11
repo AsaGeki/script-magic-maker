@@ -9,7 +9,7 @@ from PIL import Image
 from app.deck.legalidade import AnaliseDoDeck
 from app.deck.texto import analisar_lista
 from app.print import layout
-from app.slug import slug
+from app.slug import SEPARADOR, slug
 
 ARQUIVO_METADATA = "metadata.txt"
 
@@ -129,10 +129,25 @@ def conferir_copias(pasta: Path) -> tuple[list[str], list[str]]:
 
 
 def impressao_do_arquivo(nome: str) -> tuple[str, str] | None:
-    """Edicao e numero de colecionador que o nome do png carrega, no formato
-    `<nome-da-carta>-<edicao>-<numero>.png` que o app.maker grava. None quando
-    o arquivo foi renomeado e perdeu o par."""
-    match Path(nome).stem.rsplit("-", 2):
+    """Edicao e numero de colecionador que o nome do png carrega, ou None.
+
+    O formato de hoje e `<carta>--<edicao>--<numero>[--<moldura>]` (ver
+    app.slug.nome_de_arquivo): o separador duplo nao sai de dentro de nenhuma
+    parte, entao a divisao e exata.
+
+    Arquivo gravado antes disso usa traco simples e so da pra ler por palpite
+    - as duas ultimas partes. O palpite erra quando o numero tem traco
+    ("ELD-1", da PLST) ou quando o nome leva a moldura no fim, e foi por isso
+    que o separador mudou.
+    """
+    caule = Path(nome).stem
+    if SEPARADOR in caule:
+        match caule.split(SEPARADOR):
+            case [_, edicao, numero, *_]:
+                return edicao, numero
+            case _:
+                return None
+    match caule.rsplit("-", 2):
         case [_, edicao, numero]:
             return edicao, numero
         case _:
