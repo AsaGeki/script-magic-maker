@@ -50,18 +50,27 @@ recente de palavra-chave perene, não.
 - **Emblema.** Cai na moldura de criatura comum, como a ficha caía antes. O
   pacote é o `Emblem`, no mesmo grupo `Token-2`.
 
-### Terreno básico sem borda e sem barra de nome
+### Barra escura no topo do terreno básico da UNF
 
 Das 74 impressões sem borda, 20 põem o nome no topo em vez da barra de baixo:
-UNF (15) e UST (5). São duas variantes diferentes entre si, e as duas entram
-quando isto for feito: a UNF tem uma barra fina escura arredondada no topo, a
-UST tem só o texto branco sobre a arte, sem barra nenhuma.
+UNF (15) e UST (5). O nome no topo já sai — `set_type` vem na própria carta e
+manda as 20 para a moldura `TextlessBasicsBorderlessTopo`. A posição foi
+calibrada pelo pico de borda dos scans da UNF (0,07–0,10 em três amostras) e a
+saída bate: 0,08–0,09. A UST imprime um pouco mais acima (0,03–0,04) e sai um
+fio baixa.
 
-O que trava: o único campo que separa essas coleções das outras é o `set_type`
-(`funny`), que fica na coleção e não na carta — `security_stamp`, `frame`,
-`frame_effects` e `textless` são iguais aos da SLD e da EOE, que têm barra.
-Declarar `set_type` no `ScryfallCard` resolve; consultar `/sets/<código>` sob
-demanda também, ao custo de tornar `moldura_sugerida` assíncrona.
+O que falta é a barra: a UNF tem uma faixa fina escura arredondada atrás do
+nome, a UST não tem nada. Duas coisas travam.
+
+A primeira é não haver como separar as duas por regra. Dentro das 20 de
+`set_type` `funny`, `frame_effects` não serve — o `inverted` divide a própria
+UNF (10 com, 5 sem) e ainda aparece em 29 impressões fora de `funny`. Medir a
+faixa do topo nos scans também não separou: brilho médio 84,1 com `inverted`
+contra 66,3 sem, com as faixas se cruzando (UNF 235 em 126,6, UST 214 em 42,1).
+Sobra o código da coleção, que é lista chumbada.
+
+A segunda é não haver asset: o catálogo do gerador não tem essa barra, então
+ela teria de ser desenhada no canvas e conferida contra a carta impressa.
 
 ## Sem fonte de dado
 

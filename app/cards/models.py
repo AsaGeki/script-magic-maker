@@ -78,6 +78,10 @@ class ScryfallCard(FaceBase):
     rarity: Rarity
     set: str
     set_name: str
+    # Tipo da colecao ("expansion", "funny", "box"...). E o que separa a basica
+    # sem borda de colecao de piada, que imprime o nome no topo, das outras, que
+    # usam a faixa de baixo.
+    set_type: str | None = None
     collector_number: str
     released_at: date | None = None
     card_faces: list[CardFace] | None = None

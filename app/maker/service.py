@@ -55,6 +55,7 @@ MOLDURAS = {
     "Circuit": "Circuit",
     "Terreno basico de arte cheia": "TextlessBasics2022",
     "Terreno basico sem borda": "TextlessBasicsBorderless",
+    "Terreno basico sem borda com nome no topo": "TextlessBasicsBorderlessTopo",
     "Saga": "SagaRegular",
     "Caso": "Case",
     "Classe": "Class",
@@ -81,6 +82,10 @@ MOLDURA_DO_LAYOUT = {
 }
 MOLDURA_PADRAO = "M15Regular-1"
 
+# O set_type que a Wizards da as colecoes de piada (Unfinity, Unstable). So
+# elas imprimem o nome do terreno basico sem borda no topo.
+TIPO_DE_COLECAO_DE_PIADA = "funny"
+
 
 def moldura_sugerida(carta: ScryfallCard) -> str:  # noqa: PLR0911 - um return por familia de moldura
     """Moldura do #autoFrame mais proxima da impressao real.
@@ -101,6 +106,10 @@ def moldura_sugerida(carta: ScryfallCard) -> str:  # noqa: PLR0911 - um return p
     if e_terreno_basico(carta) and carta.full_art:
         # Sem borda vai mais longe: arte na carta inteira, nome na faixa de baixo.
         if carta.border_color == "borderless":
+            # Colecao de piada (UNF, UST) imprime o nome no topo. Sao as 20 das 74
+            # impressoes sem borda que fazem isso, e o set_type as separa sozinho.
+            if carta.set_type == TIPO_DE_COLECAO_DE_PIADA:
+                return MOLDURAS["Terreno basico sem borda com nome no topo"]
             return MOLDURAS["Terreno basico sem borda"]
         return MOLDURAS["Terreno basico de arte cheia"]
     if "etched" in efeitos:
