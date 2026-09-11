@@ -4,7 +4,10 @@ Os valores são exatamente os que a API devolve, sem traduzir, pra dar pra
 conferir contra a documentação oficial.
 """
 
+import logging
 from enum import StrEnum
+
+logger = logging.getLogger(__name__)
 
 
 class Layout(StrEnum):
@@ -33,8 +36,8 @@ class Layout(StrEnum):
     PLANAR = "planar"
     SCHEME = "scheme"
     VANGUARD = "vanguard"
-    TOKEN = "token"
-    DOUBLE_FACED_TOKEN = "double_faced_token"
+    TOKEN = "token"  # noqa: S105 - ficha de Magic, nao senha
+    DOUBLE_FACED_TOKEN = "double_faced_token"  # noqa: S105 - ficha de Magic, nao senha
     EMBLEM = "emblem"
     AUGMENT = "augment"
     HOST = "host"
@@ -46,6 +49,7 @@ class Layout(StrEnum):
 
     @classmethod
     def _missing_(cls, value: object) -> "Layout":
+        logger.info("Layout novo no Scryfall, caindo em UNKNOWN: %s", value)
         return cls.UNKNOWN
 
 
@@ -63,4 +67,5 @@ class Rarity(StrEnum):
 
     @classmethod
     def _missing_(cls, value: object) -> "Rarity":
+        logger.info("Raridade nova no Scryfall, caindo em UNKNOWN: %s", value)
         return cls.UNKNOWN
