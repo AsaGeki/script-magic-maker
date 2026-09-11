@@ -346,10 +346,14 @@ def _flavor_traduzido(carta: ScryfallCard) -> str | None:
     return carta.flavor_text
 
 
+def _host(url: str) -> str:
+    """O host de uma URL http(s), sem a porta."""
+    return url.split("/", 3)[2].split(":", 1)[0]
+
+
 async def _filtrar_rede(rota: Route) -> None:
     """Deixa passar so o servidor local e as fontes de dados e arte."""
-    host = rota.request.url.split("/")[2].split(":")[0]
-    if host in HOSTS_LIBERADOS:
+    if _host(rota.request.url) in HOSTS_LIBERADOS:
         await rota.continue_()
     else:
         await rota.abort()
@@ -392,31 +396,9 @@ async def abrir_pagina(browser: Browser) -> Page:
     # O parametro mtgpics liga a arte grande; sem ele fica no art_crop 626x457.
     await page.goto(f"{CARDCONJURER_URL}/creator/?mtgpics=1", wait_until="load")
     await page.wait_for_function("typeof fetchScryfallData === 'function'")
-    await _desativar_arte_automatica(page)
     await _carregar_moldura_inicial(page)
     await _registrar_fonte_sem_bug(page)
     return page
-
-
-async def _desativar_arte_automatica(page: Page) -> None:
-    """Impede o Card Conjurer de buscar a arte por conta própria.
-
-    A busca do site acontece depois de cada importação e, além de ser
-    redundante, carrega o art_crop pelo Chromium. Quando a rede do navegador
-    bloqueia a imagem, o HTMLImageElement entra no estado broken e o drawCard()
-    seguinte aborta. A arte é baixada por app.maker.arte e entregue como data
-    URL mais adiante, então a busca interna unique=art não deve sequer sair da
-    página.
-    """
-    await page.evaluate(
-        """() => {
-            const buscarNoScryfall = window.fetchScryfallData;
-            window.fetchScryfallData = function(nome, callback, unique) {
-                if (unique === 'art') return;
-                return buscarNoScryfall.call(this, nome, callback, unique);
-            };
-        }"""
-    )
 
 
 # A mesma Beleren sob outro nome (ver browser/trocar-fonte-sem-bug.js).
@@ -854,6 +836,23 @@ async def fill_card(
         )
 
 
+def _logar_requisicao_falha(requisicao, carta: ScryfallCard) -> None:
+    """Requisicao que morreu por conta propria, nao a que nos mesmos cortamos.
+
+    O `_filtrar_rede` aborta tudo que nao esta em HOSTS_LIBERADOS, e cada
+    aborte desses chega aqui como "requisicao falhou". Logar isso afogaria a
+    falha de verdade no meio do bloqueio de rotina.
+    """
+    if _host(requisicao.url) not in HOSTS_LIBERADOS:
+        return
+    logger.warning(
+        "%s: requisicao falhou - %s (%s)",
+        carta.nome_exibido,
+        requisicao.url,
+        requisicao.failure,
+    )
+
+
 def _diagnosticar(page: Page, carta: ScryfallCard) -> None:
     """Loga erro de JS do gerador - o `drawCard()` do Card Conjurer pode
     abortar no meio (ex: a busca de arte automatica dele, que roda em paralelo
@@ -871,15 +870,7 @@ def _diagnosticar(page: Page, carta: ScryfallCard) -> None:
             else None
         ),
     )
-    page.on(
-        "requestfailed",
-        lambda req: logger.warning(
-            "%s: requisicao falhou - %s (%s)",
-            carta.nome_exibido,
-            req.url,
-            req.failure,
-        ),
-    )
+    page.on("requestfailed", lambda req: _logar_requisicao_falha(req, carta))
     page.on(
         "response",
         lambda resp: (
@@ -982,4 +973,7 @@ async def _preencher(
         await _aplicar_arte(page, carta, usar_mtgpics=arte_mtgpics)
         return await _salvar(page, carta, pasta_destino, moldura)
     finally:
-        await page.context.close()
+        # Com o navegador ja caido, fechar o contexto estoura - e a excecao do
+        # `finally` substituiria a que explica o que deu errado de verdade.
+        with contextlib.suppress(Exception):
+            await page.context.close()
