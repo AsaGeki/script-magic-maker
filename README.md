@@ -19,10 +19,10 @@ imagem e a fonte de arte.
 ## Por que não baixar a imagem pronta do Scryfall
 
 Porque o resultado imprime pior. A imagem oficial do Scryfall é 745x1040
-(~0,77 megapixel, cerca de 298 DPI numa carta de 63,5 x 88,9 mm). O Card
-Conjurer renderiza em 1500x2100 (~3,15 megapixels, cerca de 600 DPI) — quatro
-vezes mais pixels. Como o objetivo aqui é carta pronta pra impressão, vale
-gerar em vez de baixar.
+(~0,77 megapixel, cerca de 298 DPI numa carta de 63,5 x 88,9 mm). Aqui a carta
+sai em 2010x2814 (~5,66 megapixels, cerca de 804 DPI) — **sete vezes mais
+pixels**. Como o objetivo é carta pronta pra impressão, vale gerar em vez de
+baixar.
 
 ## Stack
 

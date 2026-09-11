@@ -225,3 +225,7 @@ __marimo__/
 
 # Saida gerada pela automacao (imagens de carta e PDFs de impressao)
 output/
+
+# Rascunho de trabalho: script de medicao, resultado de bench. Nao e codigo do
+# projeto, mas passa pelo portao de qualidade igual (ver CLAUDE.md).
+/.tmp/

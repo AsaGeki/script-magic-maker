@@ -1,0 +1,18 @@
+diff --git a/js/frames/packSplit.js b/js/frames/packSplit.js
+--- a/js/frames/packSplit.js
++++ b/js/frames/packSplit.js
+@@ -22,7 +22,13 @@ document.querySelector('#loadFrameVersion').onclick = async function() {
+ 	//sets card version
+ 	card.version = 'split';
+ 	//art bounds
+-	card.artBounds = {x:0.158, y:0.0534, width:0.3734, height:0.3886};
++	/* script-magic-maker: arte-das-duas-metades-da-dividida */
++	// A carta dividida tem DUAS janelas de arte e o pacote declarava so a de
++	// cima, entao a de baixo saia sem camada de arte nenhuma - um buraco
++	// transparente de 14% do canvas. A arte entra como uma montagem do tamanho
++	// da carta, com as duas metades ja posicionadas (ver app.maker.arte.
++	// dividida), entao a janela precisa ser a carta inteira.
++	card.artBounds = {x:0, y:0, width:1, height:1};
+ 	autoFitArt();
+ 	//set symbol bounds
+ 	card.setSymbolBounds = {x:2, y:2, width:0.12, height:0.0410, vertical:'center', horizontal: 'right'};
