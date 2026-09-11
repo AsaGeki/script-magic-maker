@@ -17,6 +17,7 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 
 from app.cards import fichas
+from app.cards.models import ScryfallCard
 from app.cards.service import (
     completar_moldura_do_ingles,
     completar_traducao_parcial,
@@ -32,7 +33,7 @@ from app.vendor.server import ServidorCardConjurer
 RAIZ = Path(OUTPUT_DIR)
 
 
-def _e_ficha(carta) -> bool:
+def _e_ficha(carta: ScryfallCard) -> bool:
     return (carta.type_line or "").strip().lower().startswith(("token", "emblem"))
 
 
@@ -42,10 +43,10 @@ def _pastas(argumentos: list[str]) -> list[Path]:
     return [p for p in sorted(RAIZ.rglob("*")) if p.is_dir() and any(p.glob("*.png"))]
 
 
-async def _cartas_da_pasta(pasta: Path) -> list[tuple[str, object]]:
+async def _cartas_da_pasta(pasta: Path) -> list[tuple[str, ScryfallCard]]:
     """(arquivo, carta) de cada png, com as fichas já enriquecidas."""
-    resolvidas = []
-    for arquivo in sorted(p.name for p in pasta.glob("*.png")):
+    resolvidas: list[tuple[str, ScryfallCard]] = []
+    for arquivo in sorted(p.name for p in pasta.glob("*.png")):  # noqa: ASYNC240 - pasta local
         impressao = impressao_do_arquivo(arquivo)
         if impressao is None:
             print(f"  {pasta.name}/{arquivo}: nome sem edicao, pulando", flush=True)

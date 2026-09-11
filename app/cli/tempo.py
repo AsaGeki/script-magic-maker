@@ -7,6 +7,7 @@ responder, nao quanto tempo o sistema levou.
 """
 
 import asyncio
+import contextlib
 import time
 from contextlib import asynccontextmanager
 
@@ -25,10 +26,8 @@ async def cronometrar(console: Console, mensagem: str):
     async def atualizar(status) -> None:
         while not parar.is_set():
             status.update(f"{mensagem} [dim]({time.monotonic() - inicio:.0f}s)[/dim]")
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(parar.wait(), timeout=INTERVALO_ATUALIZACAO)
-            except TimeoutError:
-                pass
 
     with console.status(mensagem) as status:
         tarefa = asyncio.create_task(atualizar(status))

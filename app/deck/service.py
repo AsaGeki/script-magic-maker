@@ -133,7 +133,11 @@ async def _resolver(entrada: EntradaDeDeck, permitir_ingles: bool) -> ScryfallCa
                 return await find_card_by_name(entrada.nome, permitir_ingles=False)
             except AppError:
                 pass
-            if permitir_ingles and carta_en is not None and _e_a_carta_da_linha(entrada.nome, carta_en):
+            if (
+                permitir_ingles
+                and carta_en is not None
+                and _e_a_carta_da_linha(entrada.nome, carta_en)
+            ):
                 return carta_en
 
     return await find_card_by_name(entrada.nome, permitir_ingles=permitir_ingles)

@@ -13,7 +13,7 @@ import httpx
 from app.cards import arena, mtgjson
 from app.cards.models import ScryfallCard
 from app.config import SCRYFALL_USER_AGENT
-from app.errors import NotFoundError, UpstreamError
+from app.errors import ConflictError, NotFoundError, UpstreamError
 
 BASE_URL = "https://api.scryfall.com"
 
@@ -54,7 +54,7 @@ async def _get(
             resposta = await client.get(caminho, params=params)
         except httpx.HTTPError as erro:
             raise UpstreamError(f"Falha ao consultar o Scryfall: {erro}") from erro
-        if resposta.status_code != 429:
+        if resposta.status_code != httpx.codes.TOO_MANY_REQUESTS:
             return resposta
         # Retry-After com teto: o Scryfall as vezes manda dezenas de segundos, e
         # nenhuma consulta daqui justifica esperar tanto.
@@ -73,9 +73,9 @@ async def _buscar(
     resposta = await _get(
         client, "/cards/search", {"q": f"{consulta} lang:{lang}", "unique": unique}
     )
-    if resposta.status_code == 404:
+    if resposta.status_code == httpx.codes.NOT_FOUND:
         return []
-    if resposta.status_code != 200:
+    if resposta.status_code != httpx.codes.OK:
         raise UpstreamError(f"O Scryfall respondeu {resposta.status_code}.")
     cartas = [ScryfallCard.model_validate(item) for item in resposta.json().get("data", [])]
     await _enriquecer_com_arena(cartas)
@@ -149,8 +149,6 @@ async def find_card_by_name(nome: str, permitir_ingles: bool = False) -> Scryfal
         if not em_ingles:
             raise NotFoundError(f'Carta "{nome}" nao encontrada no Scryfall')
         if not permitir_ingles:
-            from app.errors import ConflictError
-
             raise ConflictError(f'"{nome}" nao tem impressao em portugues')
         logger.warning('"%s": sem impressao em portugues, usando o texto em ingles', nome)
         return em_ingles[0]
@@ -168,10 +166,12 @@ async def find_card_by_print(
     async with _cliente() as client:
         try:
             resposta = await _get(client, f"/cards/{codigo_da_edicao.lower()}/{numero}/{lang}")
-            if resposta.status_code == 404:
+            if resposta.status_code == httpx.codes.NOT_FOUND:
                 return None
-            if resposta.status_code != 200:
-                raise UpstreamError(f"O Scryfall respondeu {resposta.status_code}.")
+            if resposta.status_code != httpx.codes.OK:
+                raise UpstreamError(  # noqa: TRY301 - o except abaixo e o desvio pro MTGJSON
+                    f"O Scryfall respondeu {resposta.status_code}."
+                )
         except UpstreamError as erro:
             if not await mtgjson.disponivel():
                 raise
@@ -211,7 +211,7 @@ async def completar_moldura_do_ingles(carta: ScryfallCard) -> None:
         return
     async with _cliente() as client:
         resposta = await _get(client, f"/cards/{carta.set}/{carta.collector_number}/en")
-    if resposta.status_code != 200:
+    if resposta.status_code != httpx.codes.OK:
         return
     em_ingles = resposta.json()
     for campo in faltando:
@@ -392,9 +392,9 @@ async def _flavor_equivalente(client: httpx.AsyncClient, carta: ScryfallCard) ->
 async def find_card_by_id(card_id: str) -> ScryfallCard:
     async with _cliente() as client:
         resposta = await _get(client, f"/cards/{card_id}")
-        if resposta.status_code == 404:
+        if resposta.status_code == httpx.codes.NOT_FOUND:
             raise NotFoundError(f'Impressao "{card_id}" nao encontrada')
-        if resposta.status_code != 200:
+        if resposta.status_code != httpx.codes.OK:
             raise UpstreamError(f"O Scryfall respondeu {resposta.status_code}.")
         carta = ScryfallCard.model_validate(resposta.json())
         await _enriquecer_com_arena([carta])
@@ -413,7 +413,7 @@ async def suggest_names(trecho: str, limite: int = 15) -> list[str]:
             return [c.nome_exibido for c in achadas[:limite]]
 
         resposta = await _get(client, "/cards/autocomplete", {"q": trecho})
-        if resposta.status_code != 200:
+        if resposta.status_code != httpx.codes.OK:
             return []
         return resposta.json().get("data", [])[:limite]
 
@@ -432,7 +432,7 @@ async def _tem_impressao_pt(client: httpx.AsyncClient, codigo_da_edicao: str) ->
         )
     except UpstreamError:
         return False
-    if resposta.status_code != 200:
+    if resposta.status_code != httpx.codes.OK:
         return False
     return resposta.json().get("total_cards", 0) > 0
 
@@ -451,7 +451,7 @@ async def list_sets(limite: int = 60, so_com_portugues: bool = True) -> list[dic
     """
     async with _cliente() as client:
         resposta = await _get(client, "/sets")
-        if resposta.status_code != 200:
+        if resposta.status_code != httpx.codes.OK:
             raise UpstreamError(f"O Scryfall respondeu {resposta.status_code}.")
 
         candidatas = []
@@ -464,20 +464,17 @@ async def list_sets(limite: int = 60, so_com_portugues: bool = True) -> list[dic
                 continue
             candidatas.append(s)
 
-        edicoes = []
         if not so_com_portugues:
-            for s in candidatas[:limite]:
-                edicoes.append(_edicao_para_dict(s))
-            return edicoes
+            return [_edicao_para_dict(s) for s in candidatas[:limite]]
+
+        edicoes = []
 
         for inicio in range(0, len(candidatas), TAMANHO_DO_LOTE):
             if len(edicoes) >= limite:
                 break
             lote = candidatas[inicio : inicio + TAMANHO_DO_LOTE]
-            resultados = await asyncio.gather(
-                *(_tem_impressao_pt(client, s["code"]) for s in lote)
-            )
-            for s, tem_pt in zip(lote, resultados):
+            resultados = await asyncio.gather(*(_tem_impressao_pt(client, s["code"]) for s in lote))
+            for s, tem_pt in zip(lote, resultados, strict=True):
                 if tem_pt:
                     edicoes.append(_edicao_para_dict(s))
         return edicoes[:limite]

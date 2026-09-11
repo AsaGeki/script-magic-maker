@@ -19,6 +19,7 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 
 from app.cards import fichas
+from app.cards.models import ScryfallCard
 from app.cards.service import (
     completar_moldura_do_ingles,
     completar_traducao_parcial,
@@ -36,11 +37,11 @@ from app.slug import slug
 from app.vendor.server import ServidorCardConjurer
 
 
-def _e_ficha(carta) -> bool:
+def _e_ficha(carta: ScryfallCard) -> bool:
     return (carta.type_line or "").strip().lower().startswith(("token", "emblem"))
 
 
-async def _com_fichas_traduzidas(cartas: list) -> list:
+async def _com_fichas_traduzidas(cartas: list[ScryfallCard]) -> list[ScryfallCard]:
     """Troca cada ficha da lista pela versão que o app.cards.fichas enriquece.
 
     A tradução da ficha sai da carta que a cria, então ela precisa da lista
@@ -52,9 +53,7 @@ async def _com_fichas_traduzidas(cartas: list) -> list:
     enriquecidas = {}
     for achada in await fichas.descobrir(criadoras):
         enriquecidas[(achada.carta.set, achada.carta.collector_number)] = achada.carta
-    return [
-        enriquecidas.get((carta.set, carta.collector_number), carta) for carta in cartas
-    ]
+    return [enriquecidas.get((carta.set, carta.collector_number), carta) for carta in cartas]
 
 
 def _destino(lista: Path, argumentos: list[str]) -> Path:
@@ -69,7 +68,7 @@ async def main() -> None:
         raise SystemExit(2)
 
     lista = Path(sys.argv[1])
-    if not lista.is_file():
+    if not lista.is_file():  # noqa: ASYNC240 - arquivo local
         print(f"lista inexistente: {lista}", flush=True)
         raise SystemExit(1)
     destino = _destino(lista, sys.argv[2:])

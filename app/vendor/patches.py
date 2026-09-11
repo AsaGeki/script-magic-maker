@@ -76,16 +76,18 @@ def aplicar(diretorio: Path | None = None) -> list[Path]:
     if not faltando:
         return []
 
-    if shutil.which("git") is None:
+    git = shutil.which("git")
+    if git is None:
         raise BadRequestError("git não encontrado no PATH; ele é necessário pros patches.")
 
     aplicados = []
     for patch in faltando:
         resultado = subprocess.run(
-            ["git", "apply", "--whitespace=nowarn", str(patch)],
+            [git, "apply", "--whitespace=nowarn", str(patch)],
             cwd=raiz,
             capture_output=True,
             text=True,
+            check=False,
         )
         if resultado.returncode != 0:
             raise BadRequestError(

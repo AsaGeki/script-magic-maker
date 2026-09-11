@@ -9,7 +9,7 @@ próprio gerador vai em `patches/cardconjurer/`, onde sobrevive ao clone (ver
 `app.vendor.patches`).
 """
 
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 from app.errors import NotFoundError
@@ -17,7 +17,7 @@ from app.errors import NotFoundError
 PASTA = Path(__file__).resolve().parent
 
 
-@lru_cache(maxsize=None)
+@cache
 def carregar(nome: str) -> str:
     """O conteúdo de `<nome>.js`, pronto pro page.evaluate."""
     arquivo = PASTA / f"{nome}.js"

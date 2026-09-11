@@ -43,9 +43,7 @@ def mostrar_ficha(carta: ScryfallCard) -> None:
     if carta.mana_cost:
         linhas.append(f"Custo: {carta.mana_cost}")
     ano = f", {carta.released_at.year}" if carta.released_at else ""
-    linhas.append(
-        f"Edicao: {carta.set_name} ({carta.set.upper()}) #{carta.collector_number}{ano}"
-    )
+    linhas.append(f"Edicao: {carta.set_name} ({carta.set.upper()}) #{carta.collector_number}{ano}")
     linhas.append(f"Raridade: {carta.rarity}")
     linhas.append(f"Moldura: {nome_da_moldura(carta)}")
     if carta.power is not None and carta.toughness is not None:
@@ -64,9 +62,7 @@ def mostrar_ficha(carta: ScryfallCard) -> None:
             linhas.append(f"{titulo}{face.texto_exibido}")
         if face.flavor_text:
             linhas.append(f"[italic dim]{face.flavor_text}[/]")
-    console.print(
-        Panel("\n".join(linhas), title="Carta encontrada", border_style="cyan")
-    )
+    console.print(Panel("\n".join(linhas), title="Carta encontrada", border_style="cyan"))
     _mostrar_comparativo_arena(carta)
 
 
@@ -118,7 +114,7 @@ async def _baixar_artes(urls: list[str | None]) -> list[bytes | None]:
                 resposta = await client.get(url)
             except httpx.HTTPError:
                 return None
-            return resposta.content if resposta.status_code == 200 else None
+            return resposta.content if resposta.status_code == httpx.codes.OK else None
 
         return await asyncio.gather(*(baixar(url) for url in urls))
 
@@ -144,21 +140,23 @@ async def mostrar_impressoes_em_grade(
 
     for inicio in range(0, len(impressoes), colunas):
         lote = impressoes[inicio : inicio + colunas]
-        print(
+        console.print(
             "  ".join(
                 f"{inicio + i + 1}. {c.set.upper()} #{c.collector_number}".center(largura_cada)
                 for i, c in enumerate(lote)
-            )
+            ),
+            markup=False,
+            highlight=False,
         )
 
-        blocos = [
-            _renderizar_imagem(artes[inicio + i], largura_cada) for i in range(len(lote))
-        ]
+        blocos = [_renderizar_imagem(artes[inicio + i], largura_cada) for i in range(len(lote))]
         altura = max(len(bloco) for bloco in blocos)
         for bloco in blocos:
             bloco.extend([" " * largura_cada] * (altura - len(bloco)))
         for linha in range(altura):
-            print("  ".join(bloco[linha] for bloco in blocos))
+            console.print(
+                "  ".join(bloco[linha] for bloco in blocos), markup=False, highlight=False
+            )
 
 
 # Teto de artes desenhadas no terminal. Terreno basico passa de 280
@@ -173,14 +171,10 @@ async def escolher_impressao(impressoes: list[ScryfallCard]) -> ScryfallCard:
     if len(impressoes) == 1:
         return impressoes[0]
 
-    console.print(
-        f"\n[bold]'{impressoes[0].nome_exibido}' tem {len(impressoes)} impressoes:[/]"
-    )
+    console.print(f"\n[bold]'{impressoes[0].nome_exibido}' tem {len(impressoes)} impressoes:[/]")
     com_arte = impressoes[:MAXIMO_COM_ARTE]
     if len(com_arte) < len(impressoes):
-        console.print(
-            f"  [dim]Arte das {len(com_arte)} primeiras; a lista abaixo tem todas.[/]"
-        )
+        console.print(f"  [dim]Arte das {len(com_arte)} primeiras; a lista abaixo tem todas.[/]")
     await mostrar_impressoes_em_grade(com_arte)
 
     escolha = await questionary.select(

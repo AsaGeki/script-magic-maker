@@ -46,8 +46,9 @@ def escrever_metadata(
 
         if analise.travadas:
             linhas.append(SECAO_TRAVADAS)
-            for travada in analise.travadas:
-                linhas.append(f"{travada.nome:<38}{' '.join(travada.formatos)}")
+            linhas += [
+                f"{travada.nome:<38}{' '.join(travada.formatos)}" for travada in analise.travadas
+            ]
             linhas.append("")
 
     linhas.append(SECAO_COPIAS)
@@ -65,9 +66,9 @@ def _copias_do_texto(texto: str, com_secoes: bool) -> dict[str, int]:
         if limpa.startswith("["):
             dentro = limpa == SECAO_COPIAS
             continue
-        partes = limpa.split(maxsplit=1)
-        if dentro and len(partes) == 2 and partes[0].isdigit():
-            copias[partes[1]] = int(partes[0])
+        quantidade, _, arquivo = limpa.partition(" ")
+        if dentro and arquivo.strip() and quantidade.isdigit():
+            copias[arquivo.strip()] = int(quantidade)
     return copias
 
 
@@ -131,15 +132,13 @@ def impressao_do_arquivo(nome: str) -> tuple[str, str] | None:
     """Edicao e numero de colecionador que o nome do png carrega, no formato
     `<nome-da-carta>-<edicao>-<numero>.png` que o app.maker grava. None quando
     o arquivo foi renomeado e perdeu o par."""
-    partes = Path(nome).stem.rsplit("-", 2)
-    if len(partes) != 3:
-        return None
-    _, edicao, numero = partes
-    return edicao, numero
+    match Path(nome).stem.rsplit("-", 2):
+        case [_, edicao, numero]:
+            return edicao, numero
+        case _:
+            return None
 
 
-def montar_lote(
-    caminhos_cartas: list[Path], *, marca_corte: bool = True
-) -> list[Image.Image]:
+def montar_lote(caminhos_cartas: list[Path], *, marca_corte: bool = True) -> list[Image.Image]:
     """Folhas de frente prontas pro pdf.exportar_pdf."""
     return layout.montar_folhas_frente(caminhos_cartas, marca_corte=marca_corte)

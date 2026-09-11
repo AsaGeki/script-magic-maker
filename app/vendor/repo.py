@@ -46,12 +46,13 @@ def clonar(diretorio: Path | None = None, profundidade: int = 1) -> Path:
             "Apague a pasta e rode o setup de novo."
         )
 
-    if shutil.which("git") is None:
+    git = shutil.which("git")
+    if git is None:
         raise BadRequestError("git não encontrado no PATH; ele é necessário pro setup.")
 
     raiz.parent.mkdir(parents=True, exist_ok=True)
     comando = [
-        "git",
+        git,
         "clone",
         "--branch",
         BRANCH,

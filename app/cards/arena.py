@@ -23,7 +23,9 @@ from app.config import ARENA_CACHE_DIR, ARENA_CACHE_MAX_DIAS, SCRYFALL_USER_AGEN
 
 logger = logging.getLogger(__name__)
 
-URL_BANCO = "https://github.com/mtgatool/mtgatool-metadata/releases/latest/download/{idioma}-database.json"
+URL_BANCO = (
+    "https://github.com/mtgatool/mtgatool-metadata/releases/latest/download/{idioma}-database.json"
+)
 TIMEOUT = 60.0
 
 # {oT} = tap, {oC} = incolor, {o1} = generico... o Arena usa o mesmo simbolo
@@ -152,7 +154,7 @@ def _transformar_texto(bruto: str, nome_traduzido: str) -> str:
 
 
 def _reconstruir_regras(
-    carta_pt: dict, carta_en: dict, banco_pt: dict, banco_en: dict, nome_traduzido: str
+    carta_pt: dict, banco_pt: dict, banco_en: dict, nome_traduzido: str
 ) -> str | None:
     """Junta as linhas de AbilityIds, ou None se alguma ainda esta em ingles.
 
@@ -182,7 +184,7 @@ async def buscar_traducao(codigo_da_edicao: str, numero: str) -> TraducaoArena |
     (ver _reconstruir_regras) ou quando o banco nao pode ser baixado: esta
     fonte nunca trava quem chamou.
     """
-    global _indice_pt, _falhou
+    global _indice_pt, _falhou  # noqa: PLW0603 - cache do modulo, ver o topo
     if _falhou:
         return None
     try:
@@ -208,5 +210,5 @@ async def buscar_traducao(codigo_da_edicao: str, numero: str) -> TraducaoArena |
     if flavor and flavor == carta_en.get("FlavorText"):
         flavor = None
 
-    texto = _reconstruir_regras(carta_pt, carta_en, banco_pt, banco_en, nome)
+    texto = _reconstruir_regras(carta_pt, banco_pt, banco_en, nome)
     return TraducaoArena(nome=nome, texto=texto, flavor_text=flavor)

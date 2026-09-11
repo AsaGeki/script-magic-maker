@@ -111,9 +111,7 @@ async def consultar_legalidades(cartas: list[ScryfallCard]) -> dict[str, dict[st
     return legalidades
 
 
-async def _postar_com_retentativa(
-    cliente: httpx.AsyncClient, corpo: dict
-) -> httpx.Response | None:
+async def _postar_com_retentativa(cliente: httpx.AsyncClient, corpo: dict) -> httpx.Response | None:
     """POST em /cards/collection reespera no 429. Devolve None quando desiste -
     quem chama trata as cartas do lote como nao consultadas."""
     for tentativa in range(MAX_TENTATIVAS_429):
@@ -123,9 +121,9 @@ async def _postar_com_retentativa(
         except httpx.HTTPError as erro:
             logger.warning("legalidade indisponivel: %s", erro)
             return None
-        if resposta.status_code == 200:
+        if resposta.status_code == httpx.codes.OK:
             return resposta
-        if resposta.status_code != 429:
+        if resposta.status_code != httpx.codes.TOO_MANY_REQUESTS:
             logger.warning("legalidade indisponivel: Scryfall respondeu %s", resposta.status_code)
             return None
         espera = min(float(resposta.headers.get("Retry-After", 1 + tentativa)), ESPERA_MAXIMA_429)
@@ -148,7 +146,7 @@ def _tem_comandante(cartas: list[ScryfallCard]) -> bool:
     return any("Legendary Creature" in (carta.type_line or "") for carta in cartas)
 
 
-def analisar(
+def analisar(  # noqa: PLR0912 - um ramo por regra de construcao de formato
     cartas: list[ScryfallCard], legalidades: dict[str, dict[str, str]]
 ) -> AnaliseDoDeck:
     """Cruza a legalidade de cada carta com as regras de construcao de cada

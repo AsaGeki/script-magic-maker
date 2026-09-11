@@ -87,7 +87,7 @@ async def _buscar_json(
 async def _carregar_indice() -> list[DeckEstrutural]:
     """Baixa (ou reaproveita) o DeckList.json 1 vez por processo - trava so
     pra nao disparar 2 downloads em paralelo se o menu for chamado 2x rapido."""
-    global _indice, _falhou
+    global _indice, _falhou  # noqa: PLW0603 - cache do modulo, ver o topo
     if _indice is not None:
         return _indice
     if _falhou:
@@ -126,9 +126,7 @@ async def list_tipos_estruturais() -> list[str]:
 async def list_decks_estruturais(tipo: str) -> list[DeckEstrutural]:
     """Decks de 1 tipo, do mais recente pro mais antigo."""
     indice = await _carregar_indice()
-    return sorted(
-        (d for d in indice if d.tipo == tipo), key=lambda d: d.released_at, reverse=True
-    )
+    return sorted((d for d in indice if d.tipo == tipo), key=lambda d: d.released_at, reverse=True)
 
 
 async def buscar_entradas_do_deck(arquivo: str) -> list[EntradaDeDeck]:
@@ -150,7 +148,11 @@ async def buscar_entradas_do_deck(arquivo: str) -> list[EntradaDeDeck]:
             collector_number=carta.get("number"),
             secao=secao,
         )
-        for campo, secao in (("commander", COMMANDER), ("mainBoard", MAIN), ("sideBoard", SIDEBOARD))
+        for campo, secao in (
+            ("commander", COMMANDER),
+            ("mainBoard", MAIN),
+            ("sideBoard", SIDEBOARD),
+        )
         for carta in deck.get(campo, [])
     ]
     if not entradas:

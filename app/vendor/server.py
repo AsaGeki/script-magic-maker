@@ -9,6 +9,7 @@ Não funciona por file://: o aplicativo carrega molduras e dados por XHR, que o
 protocolo de arquivo bloqueia.
 """
 
+import os
 import socket
 import threading
 import time
@@ -49,7 +50,7 @@ class _HandlerSilencioso(SimpleHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         pass
 
-    def guess_type(self, path: str | Path) -> str:
+    def guess_type(self, path: str | os.PathLike[str]) -> str:
         tipo = super().guess_type(path)
         if tipo.startswith(TIPOS_COM_CHARSET) and "charset=" not in tipo:
             return f"{tipo}; charset=utf-8"

@@ -42,9 +42,7 @@ TRAVESSAO = "—"
 # Pegam o subtipo que so existe em ficha (Tesouro, Comida, Pista), que carta
 # nenhuma tem pra consultar.
 _SUBTIPO_EN = re.compile(r"\b([A-Z][\w'/-]*(?:\s+[A-Z][\w'/-]*)*)\s+tokens?\b")
-_SUBTIPO_PT = re.compile(
-    r"\bfichas?\s+de\s+([A-ZÀ-Ú][\wÀ-ÿ'/-]*(?:\s+[A-ZÀ-Ú][\wÀ-ÿ'/-]*)*)"
-)
+_SUBTIPO_PT = re.compile(r"\bfichas?\s+de\s+([A-ZÀ-Ú][\wÀ-ÿ'/-]*(?:\s+[A-ZÀ-Ú][\wÀ-ÿ'/-]*)*)")
 
 # A palavra vem DEPOIS do tipo, como o espanhol faz ("Artefacto ficha - Tesoro")
 # e como o portugues ja faz com supertipo ("Criatura Lendaria"). Nao ha ficha em
@@ -94,9 +92,9 @@ async def _partes_de_ficha(client: httpx.AsyncClient, carta: ScryfallCard) -> li
             f"{BASE_SCRYFALL}/cards/{carta.set}/{carta.collector_number}/en"
         )
     except httpx.HTTPError as erro:
-        logger.info('%s: nao deu pra consultar as fichas (%s)', carta.nome_exibido, erro)
+        logger.info("%s: nao deu pra consultar as fichas (%s)", carta.nome_exibido, erro)
         return []
-    if resposta.status_code != 200:
+    if resposta.status_code != httpx.codes.OK:
         return []
     partes = resposta.json().get("all_parts") or []
     return [parte for parte in partes if parte.get("component") == "token"]
@@ -120,8 +118,7 @@ async def _montar_ficha(
     # So o que sai de dentro de um lembrete precisa virar frase; a linha solta
     # ja e uma ("Voar", que na carta impressa nem leva ponto).
     regra = _como_texto_da_ficha(
-        _regra_em_portugues(criadora, ficha)
-        or await _regra_de_outra_criadora(client, ficha)
+        _regra_em_portugues(criadora, ficha) or await _regra_de_outra_criadora(client, ficha)
     ) or await _linha_solta_em_portugues(client, ficha)
     if nome or regra:
         # Pelo caminho que o gerador ja usa pra texto nao impresso.
@@ -183,7 +180,7 @@ async def _metade_traduzida(
         )
     except httpx.HTTPError:
         return None
-    if resposta.status_code != 200:
+    if resposta.status_code != httpx.codes.OK:
         return None
 
     for bruta in resposta.json().get("data", []):
@@ -237,9 +234,7 @@ CANDIDATAS_DE_LEMBRETE = 8
 CANDIDATAS_DE_LINHA_SOLTA = 30
 
 
-async def _regra_de_outra_criadora(
-    client: httpx.AsyncClient, ficha: ScryfallCard
-) -> str | None:
+async def _regra_de_outra_criadora(client: httpx.AsyncClient, ficha: ScryfallCard) -> str | None:
     """O lembrete da ficha tirado de outra carta que cria a mesma ficha.
 
     A carta-mae nem sempre descreve a ficha - o Oko em portugues traz so "Crie
@@ -265,9 +260,7 @@ async def _regra_de_outra_criadora(
     return None
 
 
-async def _linha_solta_em_portugues(
-    client: httpx.AsyncClient, ficha: ScryfallCard
-) -> str | None:
+async def _linha_solta_em_portugues(client: httpx.AsyncClient, ficha: ScryfallCard) -> str | None:
     """Ficha cujo texto e uma linha so, sem lembrete que descreva ela.
 
     E o caso da palavra-chave sozinha ("Flying"), que carta nenhuma poe entre
@@ -310,8 +303,9 @@ def _mesma_linha(em_ingles: str, alvo: str) -> bool:
     O lembrete entre parenteses fica de fora: a mesma palavra-chave sai com
     redacao diferente entre a ficha e a carta.
     """
+
     def sem_lembrete(texto: str) -> str:
-        return texto.split("(")[0].strip().rstrip(".").strip().lower()
+        return texto.split("(", maxsplit=1)[0].strip().rstrip(".").strip().lower()
 
     return sem_lembrete(em_ingles) == sem_lembrete(alvo) and bool(sem_lembrete(alvo))
 

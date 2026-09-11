@@ -111,17 +111,17 @@ async def _baixar(caminho: Path) -> None:
     """
     caminho.parent.mkdir(parents=True, exist_ok=True)
     compactado = caminho.with_suffix(".sqlite.gz.parcial")
-    logger.warning(
-        "Baixando o banco do MTGJSON (230 MB, so na primeira vez): %s", URL_BANCO
-    )
-    async with httpx.AsyncClient(
-        timeout=TIMEOUT, follow_redirects=True, headers={"User-Agent": SCRYFALL_USER_AGENT}
-    ) as client:
-        async with client.stream("GET", URL_BANCO) as resposta:
-            resposta.raise_for_status()
-            with compactado.open("wb") as saida:
-                async for pedaco in resposta.aiter_bytes(1024 * 1024):
-                    saida.write(pedaco)
+    logger.warning("Baixando o banco do MTGJSON (230 MB, so na primeira vez): %s", URL_BANCO)
+    async with (
+        httpx.AsyncClient(
+            timeout=TIMEOUT, follow_redirects=True, headers={"User-Agent": SCRYFALL_USER_AGENT}
+        ) as client,
+        client.stream("GET", URL_BANCO) as resposta,
+    ):
+        resposta.raise_for_status()
+        with compactado.open("wb") as saida:
+            async for pedaco in resposta.aiter_bytes(1024 * 1024):
+                saida.write(pedaco)
 
     await asyncio.to_thread(_descompactar, compactado, caminho)
     compactado.unlink(missing_ok=True)
@@ -141,7 +141,7 @@ async def _banco() -> sqlite3.Connection | None:
     None quando o download falha - esta fonte e a saida de emergencia e nunca
     derruba quem chamou.
     """
-    global _conexao, _falhou
+    global _conexao, _falhou  # noqa: PLW0603 - cache do modulo, ver o topo
     if _conexao is not None:
         return _conexao
     if _falhou:
@@ -301,9 +301,7 @@ def _varias_faces(linhas: list[sqlite3.Row], lang: str, layout: str) -> dict[str
     faces = []
     for indice, linha in enumerate(linhas):
         face = _face(linha, lang)
-        face["image_uris"] = (
-            _imagens(linha["scryfallId"], verso=indice > 0) if tem_verso else None
-        )
+        face["image_uris"] = _imagens(linha["scryfallId"], verso=indice > 0) if tem_verso else None
         faces.append(face)
 
     frente = linhas[0]
@@ -316,9 +314,7 @@ def _varias_faces(linhas: list[sqlite3.Row], lang: str, layout: str) -> dict[str
         # O ilustrador e' da impressao, nao da face: fica no topo em qualquer
         # layout, e e' por ele que a busca de arte confere a ilustracao. Cada
         # face pode ter o seu, e ai o Scryfall lista os dois juntos.
-        "artist": " & ".join(
-            dict.fromkeys(linha["artist"] for linha in linhas if linha["artist"])
-        ),
+        "artist": " & ".join(dict.fromkeys(linha["artist"] for linha in linhas if linha["artist"])),
     }
     if tem_verso:
         return topo
@@ -365,8 +361,9 @@ def _face(linha: sqlite3.Row, lang: str) -> dict[str, Any]:
 
 
 # O MTGJSON poe o custo de lealdade do planeswalker entre colchetes ("[+1]:",
-# "[−X]:"); a carta impressa e o Scryfall escrevem sem eles.
-_COLCHETE_DE_LEALDADE = re.compile(r"^\[([+−-]?(?:\d+|X))\]:", re.MULTILINE)
+# "[-X]:"); a carta impressa e o Scryfall escrevem sem eles. O menos do banco e
+# o U+2212, escrito como escape pra nao se confundir com o hifen ao lado.
+_COLCHETE_DE_LEALDADE = re.compile(r"^\[([+\u2212-]?(?:\d+|X))\]:", re.MULTILINE)
 
 
 def _sem_colchete_de_lealdade(texto: str | None) -> str | None:

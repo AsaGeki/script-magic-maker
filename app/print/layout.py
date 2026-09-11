@@ -55,20 +55,18 @@ def _posicoes_grade() -> list[tuple[int, int]]:
     ]
 
 
-def _fronteiras_de_corte(
-    margem_px: int, tamanho_celula_px: int, quantidade: int
-) -> list[int]:
+def _fronteiras_de_corte(margem_px: int, tamanho_celula_px: int, quantidade: int) -> list[int]:
     """Posicao (px), num eixo, de cada linha de corte: comeca na borda externa
     da grade, passa pelo meio do espaco entre cada par de celulas vizinhas,
     termina na borda oposta - sempre `quantidade + 1` linhas."""
     passo_px = tamanho_celula_px + ESPACO_ENTRE_CARTAS_PX
     fronteiras = [margem_px]
-    for indice in range(1, quantidade):
-        fronteiras.append(margem_px + indice * passo_px - ESPACO_ENTRE_CARTAS_PX // 2)
+    fronteiras += [
+        margem_px + indice * passo_px - ESPACO_ENTRE_CARTAS_PX // 2
+        for indice in range(1, quantidade)
+    ]
     fronteiras.append(
-        margem_px
-        + quantidade * tamanho_celula_px
-        + (quantidade - 1) * ESPACO_ENTRE_CARTAS_PX
+        margem_px + quantidade * tamanho_celula_px + (quantidade - 1) * ESPACO_ENTRE_CARTAS_PX
     )
     return fronteiras
 
@@ -108,11 +106,11 @@ def montar_folhas_frente(
     for inicio in range(0, len(caminhos_cartas), CARTAS_POR_FOLHA):
         lote = caminhos_cartas[inicio : inicio + CARTAS_POR_FOLHA]
         folha = _nova_folha()
-        for (x, y), caminho in zip(_posicoes_grade(), lote):
+        for (x, y), caminho in zip(_posicoes_grade(), lote, strict=False):
             carta = (
                 Image.open(caminho)
                 .convert("RGB")
-                .resize((CARTA_LARGURA_PX, CARTA_ALTURA_PX), Image.LANCZOS)
+                .resize((CARTA_LARGURA_PX, CARTA_ALTURA_PX), Image.Resampling.LANCZOS)
             )
             folha.paste(carta, (x, y))
         if marca_corte:
@@ -124,7 +122,7 @@ def montar_folhas_frente(
 def montar_folha_repetida(celula: Image.Image, *, marca_corte: bool = True) -> Image.Image:
     """1 folha A4 com a MESMA imagem nas 9 celulas da grade - usada pro verso
     generico (app.print.verso), onde toda celula sai igual de proposito."""
-    celula = celula.resize((CARTA_LARGURA_PX, CARTA_ALTURA_PX), Image.LANCZOS)
+    celula = celula.resize((CARTA_LARGURA_PX, CARTA_ALTURA_PX), Image.Resampling.LANCZOS)
     folha = _nova_folha()
     for x, y in _posicoes_grade():
         folha.paste(celula, (x, y))
