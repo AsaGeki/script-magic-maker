@@ -33,3 +33,65 @@ packages = ["app"]
 [tool.ruff]
 line-length = 100
 target-version = "py313"
+extend-exclude = ["vendor"]
+
+[tool.ruff.lint]
+# Explicito de proposito: o conjunto padrao do ruff muda de versao pra versao, e
+# o gate de qualidade nao pode apertar ou afrouxar sozinho num `uv sync`.
+select = [
+    "F",     # pyflakes: nome indefinido, import morto, f-string sem campo
+    "E",     # pycodestyle
+    "W",     # pycodestyle (warning)
+    "I",     # isort: ordem dos imports
+    "UP",    # pyupgrade: sintaxe velha pro alvo py313
+    "B",     # bugbear: armadilha de runtime (default mutavel, loop com closure)
+    "SIM",   # simplify
+    "C4",    # comprehension no lugar de map/filter/dict()
+    "RET",   # return redundante
+    "PTH",   # os.path -> pathlib
+    "ARG",   # argumento que a funcao nao usa
+    "ASYNC", # chamada bloqueante dentro de corrotina
+    "BLE",   # except Exception sem motivo declarado
+    "S",     # bandit: subprocess, tempfile, except vazio
+    "DTZ",   # datetime sem fuso
+    "ISC",   # concatenacao implicita de string
+    "T20",   # print solto
+    "PERF",  # laco que devia ser comprehension
+    "PL",    # pylint
+    "TRY",   # try/except mal montado
+    "N",     # pep8-naming
+    "RUF",   # regras proprias do ruff, inclui noqa morto
+]
+ignore = [
+    # Unica regra desligada no projeto inteiro. A mensagem do raise e o texto que
+    # o usuario final le no terminal (ver app.errors) e muda a cada ponto de
+    # falha: hoje sao 34 raises, cada um com o seu. O que a regra pede - guardar
+    # a mensagem numa variavel antes de levantar - nao deixa nada mais claro e
+    # espalha 34 variaveis de uso unico. Qualquer outra excecao a uma regra mora
+    # num `# noqa` na propria linha, com o motivo ao lado.
+    "TRY003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Nos scripts o print E a interface: eles rodam em terminal nao interativo, sem
+# o Console do rich.
+"scripts/*.py" = ["T201"]
+
+[tool.ruff.lint.pylint]
+# O teto de 5 do pylint e arbitrario. Seis e o que as funcoes de geracao
+# pedem hoje (fill_card e _preencher levam uma opcao por escolha do menu, e
+# todas keyword-only); a setima ainda reprova.
+max-args = 6
+
+[tool.ruff.lint.pep8-naming]
+# O `cls` do `_missing_` de enum e a assinatura que o Python impoe.
+classmethod-decorators = ["classmethod", "pydantic.field_validator"]
+
+[tool.ty.src]
+exclude = ["vendor", ".venv", "output"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.7",
+    "ty>=0.0.80",
+]
