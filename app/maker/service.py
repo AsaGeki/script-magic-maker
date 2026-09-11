@@ -8,11 +8,14 @@ moldura e compor as camadas. A imagem sai lida direto do `cardCanvas`.
 
 import asyncio
 import base64
+import logging
 import re
 from contextlib import asynccontextmanager
 from datetime import date
+from io import BytesIO
 from pathlib import Path
 
+from PIL import Image
 from playwright.async_api import Browser, Page, Route, async_playwright
 
 from app.cards.enums import Layout, Rarity
@@ -29,6 +32,8 @@ from app.maker import arte
 from app.maker.browser import carregar
 from app.slug import slug
 from app.vendor.server import ServidorCardConjurer
+
+logger = logging.getLogger(__name__)
 
 # Carta avulsa; deck passa a propria pasta em `pasta_destino`.
 PASTA_CARTAS_AVULSAS = Path(OUTPUT_DIR) / "cards"
@@ -76,7 +81,7 @@ MOLDURA_DO_LAYOUT = {
 MOLDURA_PADRAO = "M15Regular-1"
 
 
-def moldura_sugerida(carta: ScryfallCard) -> str:
+def moldura_sugerida(carta: ScryfallCard) -> str:  # noqa: PLR0911 - um return por familia de moldura
     """Moldura do #autoFrame mais proxima da impressao real.
 
     O #autoFrame decide sozinho so cor e tipo; a familia de moldura (M15, 8a
@@ -136,10 +141,7 @@ HOSTS_LIBERADOS = (
     "127.0.0.1",
     "localhost",
     "api.scryfall.com",
-    "cards.scryfall.io",
     "svgs.scryfall.io",
-    "www.mtgpics.com",
-    "mtgpics.com",
 )
 
 # So pra existir um card.text na abertura: sem ele, changeCardIndex() e
@@ -208,6 +210,9 @@ _APLICAR_MARCA_DAGUA = carregar("aplicar-marca-dagua")
 # Em porcentagem, como o campo do gerador. Ver aplicar-marca-dagua.js: o padrao
 # dele e 40, e no terreno basico a carta impressa traz o simbolo quase opaco.
 OPACIDADE_DA_MARCA_DAGUA = 100
+
+# Status a partir do qual a resposta do navegador vira aviso no log.
+PRIMEIRO_STATUS_DE_ERRO = 400
 
 INTERVALO_AMOSTRA = 0.3
 AMOSTRAS_IGUAIS = 3  # leituras seguidas sem mudanca = desenho terminou
@@ -386,9 +391,31 @@ async def abrir_pagina(browser: Browser) -> Page:
     # O parametro mtgpics liga a arte grande; sem ele fica no art_crop 626x457.
     await page.goto(f"{CARDCONJURER_URL}/creator/?mtgpics=1", wait_until="load")
     await page.wait_for_function("typeof fetchScryfallData === 'function'")
+    await _desativar_arte_automatica(page)
     await _carregar_moldura_inicial(page)
     await _registrar_fonte_sem_bug(page)
     return page
+
+
+async def _desativar_arte_automatica(page: Page) -> None:
+    """Impede o Card Conjurer de buscar a arte por conta própria.
+
+    A busca do site acontece depois de cada importação e, além de ser
+    redundante, carrega o art_crop pelo Chromium. Quando a rede do navegador
+    bloqueia a imagem, o HTMLImageElement entra no estado broken e o drawCard()
+    seguinte aborta. A arte é baixada por app.maker.arte e entregue como data
+    URL mais adiante, então a busca interna unique=art não deve sequer sair da
+    página.
+    """
+    await page.evaluate(
+        """() => {
+            const buscarNoScryfall = window.fetchScryfallData;
+            window.fetchScryfallData = function(nome, callback, unique) {
+                if (unique === 'art') return;
+                return buscarNoScryfall.call(this, nome, callback, unique);
+            };
+        }"""
+    )
 
 
 # A mesma Beleren sob outro nome (ver browser/trocar-fonte-sem-bug.js).
@@ -453,17 +480,13 @@ async def _selecionar_impressao(page: Page, carta: ScryfallCard) -> bool:
     Devolve se precisou mesmo trocar: trocar a toa dispara uma segunda consulta
     da edicao e o numero do colecionador sai duplicado ("187/361/361").
     """
-    indice = await page.evaluate(
-        "(id) => scryfallCard.findIndex(c => c.id === id)", carta.id
-    )
+    indice = await page.evaluate("(id) => scryfallCard.findIndex(c => c.id === id)", carta.id)
     if indice is None or indice < 0:
         # A impressao exata nao veio na busca do gerador. Fica a que o
         # importCard() aplicou sozinho: um indice arbitrario pode nao ser opcao
         # valida do <select> e travar o changeCardIndex().
         return False
-    atual = await page.evaluate(
-        "() => Number(document.querySelector('#import-index').value)"
-    )
+    atual = await page.evaluate("() => Number(document.querySelector('#import-index').value)")
     if indice == atual:
         return False
     await page.evaluate(_SELECIONAR_IMPRESSAO, indice)
@@ -485,7 +508,7 @@ async def _aspecto_da_janela_de_arte(page: Page) -> float | None:
     )
 
 
-async def _aplicar_arte(page: Page, carta: ScryfallCard) -> bool:
+async def _aplicar_arte(page: Page, carta: ScryfallCard, *, usar_mtgpics: bool) -> None:
     """Troca a arte que o gerador achou sozinho pela maior disponivel.
 
     Quem escolhe e confere e o app.maker.arte; aqui a imagem so e entregue.
@@ -495,12 +518,15 @@ async def _aplicar_arte(page: Page, carta: ScryfallCard) -> bool:
     if carta.layout == Layout.SPLIT:
         data_url = await arte.dividida(carta)
     else:
-        data_url = await arte.buscar(carta, await _aspecto_da_janela_de_arte(page))
+        data_url = await arte.buscar(
+            carta,
+            await _aspecto_da_janela_de_arte(page),
+            usar_mtgpics=usar_mtgpics,
+        )
     if data_url is None:
-        return False
+        raise UpstreamError(f"{carta.nome_exibido}: não foi possível baixar a arte da impressão")
     await page.evaluate("(src) => uploadArt(src, 'autoFit')", data_url)
     await _esperar_desenho(page)
-    return True
 
 
 async def _aplicar_marca_dagua(page: Page, carta: ScryfallCard, moldura: str) -> None:
@@ -561,9 +587,7 @@ def _capitulos_de_saga(carta: ScryfallCard) -> dict | None:
         achado = _CAPITULO_DE_SAGA.match(linha)
         if not achado:
             return None
-        blocos.append(
-            {"capitulos": len(achado.group(1).split(",")), "texto": achado.group(2)}
-        )
+        blocos.append({"capitulos": len(achado.group(1).split(",")), "texto": achado.group(2)})
     return {"lembrete": lembrete, "blocos": blocos} if blocos else None
 
 
@@ -702,9 +726,7 @@ async def _aplicar_raridade(page: Page, carta: ScryfallCard) -> None:
 _APLICAR_NOME_TRADUZIDO = carregar("aplicar-nome-traduzido")
 
 
-async def _aplicar_nome_traduzido(
-    page: Page, carta: ScryfallCard, *, preferir_arena: bool
-) -> None:
+async def _aplicar_nome_traduzido(page: Page, carta: ScryfallCard, *, preferir_arena: bool) -> None:
     """Poe no titulo o nome traduzido montado fora do Scryfall: o do terreno
     basico sem impressao em portugues e o do MTG Arena."""
     if carta.lang != "en":
@@ -716,9 +738,13 @@ async def _aplicar_nome_traduzido(
     await page.evaluate(_APLICAR_NOME_TRADUZIDO, nome)
 
 
-async def _aplicar_moldura(page: Page, carta: ScryfallCard) -> None:
+async def _aplicar_moldura(page: Page, carta: ScryfallCard, moldura: str) -> None:
     """Refaz a moldura automatica com a linha de tipo em ingles (ver
     _APLICAR_MOLDURA). Depois do import: e ele que enche card.text.type."""
+    await page.evaluate(
+        "(moldura) => { document.querySelector('#autoFrame').value = moldura; }",
+        moldura,
+    )
     await page.evaluate(
         _APLICAR_MOLDURA,
         {
@@ -737,11 +763,31 @@ async def _esperar_fontes(page: Page) -> None:
     await page.evaluate("() => document.fonts.ready")
 
 
-async def _salvar(page: Page, carta: ScryfallCard, pasta_destino: Path | None, moldura: str) -> Path:
+# Fracao minima do canvas que precisa sair opaca. Uma carta completa fica em
+# ~99,9% (so o arredondado dos cantos fica fora); quando o drawCard() do
+# gerador aborta no meio, sobra so uma fatia do canvas, bem abaixo disso.
+OPACIDADE_MINIMA_DO_CANVAS = 0.9
+
+
+def _checar_desenho_completo(carta: ScryfallCard, png: bytes) -> None:
+    histograma = Image.open(BytesIO(png)).convert("RGBA").getchannel("A").histogram()
+    opacos = sum(histograma[11:])
+    fracao = opacos / sum(histograma)
+    if fracao < OPACIDADE_MINIMA_DO_CANVAS:
+        raise UpstreamError(
+            f"{carta.nome_exibido}: o canvas saiu {fracao:.0%} pintado, o desenho nao terminou"
+        )
+
+
+async def _salvar(
+    page: Page, carta: ScryfallCard, pasta_destino: Path | None, moldura: str
+) -> Path:
     await _esperar_fontes(page)
     data_url = await page.evaluate("() => cardCanvas.toDataURL('image/png')")
     if not data_url or not data_url.startswith("data:image/png;base64,"):
         raise UpstreamError("O canvas nao devolveu uma imagem PNG")
+    conteudo = base64.b64decode(data_url.split(",", 1)[1])
+    _checar_desenho_completo(carta, conteudo)
 
     pasta = pasta_destino or PASTA_CARTAS_AVULSAS
     pasta.mkdir(parents=True, exist_ok=True)
@@ -750,7 +796,7 @@ async def _salvar(page: Page, carta: ScryfallCard, pasta_destino: Path | None, m
     if moldura != moldura_sugerida(carta):
         nome_base += f"-{moldura}"
     destino = pasta / f"{slug(nome_base)}.png"
-    destino.write_bytes(base64.b64decode(data_url.split(",", 1)[1]))
+    destino.write_bytes(conteudo)
     return destino
 
 
@@ -788,22 +834,72 @@ async def fill_card(
         )
 
     if browser is not None:
-        return await _preencher(browser, carta, pasta_destino, moldura, arte_mtgpics, preferir_arena)
+        return await _preencher(
+            browser,
+            carta,
+            pasta_destino=pasta_destino,
+            moldura=moldura,
+            arte_mtgpics=arte_mtgpics,
+            preferir_arena=preferir_arena,
+        )
     async with navegador() as proprio:
         return await _preencher(
-            proprio, carta, pasta_destino, moldura, arte_mtgpics, preferir_arena
+            proprio,
+            carta,
+            pasta_destino=pasta_destino,
+            moldura=moldura,
+            arte_mtgpics=arte_mtgpics,
+            preferir_arena=preferir_arena,
         )
+
+
+def _diagnosticar(page: Page, carta: ScryfallCard) -> None:
+    """Loga erro de JS do gerador - o `drawCard()` do Card Conjurer pode
+    abortar no meio (ex: a busca de arte automatica dele, que roda em paralelo
+    com a nossa, falhando) sem avisar nada em Python; so o console do
+    navegador denuncia."""
+    page.on(
+        "pageerror",
+        lambda erro: logger.warning("%s: erro no gerador - %s", carta.nome_exibido, erro),
+    )
+    page.on(
+        "console",
+        lambda msg: (
+            logger.warning("%s: console do gerador - %s", carta.nome_exibido, msg.text)
+            if msg.type == "error"
+            else None
+        ),
+    )
+    page.on(
+        "requestfailed",
+        lambda req: logger.warning(
+            "%s: requisicao falhou - %s (%s)",
+            carta.nome_exibido,
+            req.url,
+            req.failure,
+        ),
+    )
+    page.on(
+        "response",
+        lambda resp: (
+            logger.warning("%s: %s em %s", carta.nome_exibido, resp.status, resp.url)
+            if resp.status >= PRIMEIRO_STATUS_DE_ERRO
+            else None
+        ),
+    )
 
 
 async def _preencher(
     browser: Browser,
     carta: ScryfallCard,
+    *,
     pasta_destino: Path | None,
     moldura: str,
     arte_mtgpics: bool,
     preferir_arena: bool,
 ) -> Path:
     page = await abrir_pagina(browser)
+    _diagnosticar(page, carta)
     try:
         # Escrito por evaluate, nao por select_option: o onchange do
         # #import-language e o mesmo importChanged() do #importAllPrints (ver
@@ -812,7 +908,6 @@ async def _preencher(
         await page.evaluate(
             "(lang) => { document.querySelector('#import-language').value = lang; }", carta.lang
         )
-        await page.select_option("#autoFrame", moldura)
         # setBottomInfoStyle() de novo porque o layout do rodape ja foi montado
         # na abertura da pagina, quando ainda nao se sabia qual carta viria.
         await page.evaluate(
@@ -833,8 +928,10 @@ async def _preencher(
         # A busca abaixo passa unique='prints', o que o importChanged() faria se
         # a chamada viesse pela interface: sem isso vem uma impressao so por
         # nome, e o id da carta escolhida pode nem estar na lista.
-        usar_arena = preferir_arena and carta.arena is not None and bool(
-            carta.arena.nome or carta.arena.texto
+        usar_arena = (
+            preferir_arena
+            and carta.arena is not None
+            and bool(carta.arena.nome or carta.arena.texto)
         )
         await page.evaluate(
             _IMPORTAR_CARTAS,
@@ -845,12 +942,10 @@ async def _preencher(
                 "textoDeReserva": _texto_de_reserva(carta),
                 # Impressao em ingles com printed_type_line so acontece quando a
                 # traducao foi montada por fora - hoje, as fichas.
-                "tipoTraduzido": (
-                    carta.printed_type_line if carta.lang == "en" else None
-                ),
+                "tipoTraduzido": (carta.printed_type_line if carta.lang == "en" else None),
                 "textoTraduzido": _texto_traduzido(carta),
                 "flavorTraduzido": _flavor_traduzido(carta),
-                "palavrasDeHabilidade": list(palavras_de_habilidade()),
+                "palavrasDeHabilidade": list(await palavras_de_habilidade()),
                 "arenaId": carta.id if usar_arena else None,
                 "arenaTexto": carta.arena.texto if usar_arena else None,
                 "arenaFlavor": carta.arena.flavor_text if usar_arena else None,
@@ -871,7 +966,7 @@ async def _preencher(
         await _esperar_desenho(page)
         if await _selecionar_impressao(page, carta):
             await _esperar_desenho(page)
-        await _aplicar_moldura(page, carta)
+        await _aplicar_moldura(page, carta, moldura)
         await _aplicar_saga(page, carta)
         await _aplicar_classe(page, carta)
         await _aplicar_vanguarda(page, carta)
@@ -883,8 +978,7 @@ async def _preencher(
         await _aplicar_nome_traduzido(page, carta, preferir_arena=usar_arena)
         await _aplicar_raridade(page, carta)
         await _redesenhar_texto_final(page)
-        if arte_mtgpics:
-            await _aplicar_arte(page, carta)
+        await _aplicar_arte(page, carta, usar_mtgpics=arte_mtgpics)
         return await _salvar(page, carta, pasta_destino, moldura)
     finally:
         await page.context.close()

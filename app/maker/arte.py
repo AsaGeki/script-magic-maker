@@ -54,7 +54,12 @@ _TITULO = re.compile(r"<title>(.*?)\s*-\s*mtgpics\.com</title>", re.IGNORECASE |
 _REF_DO_RESULTADO = re.compile(r"card\?ref=([a-z0-9]+)", re.IGNORECASE)
 
 
-async def buscar(carta: ScryfallCard, aspecto_da_janela: float | None = None) -> str | None:
+async def buscar(
+    carta: ScryfallCard,
+    aspecto_da_janela: float | None = None,
+    *,
+    usar_mtgpics: bool = True,
+) -> str | None:
     """Data URL com a melhor arte disponivel pra esta impressao, ou None.
 
     `aspecto_da_janela` e largura/altura da janela de arte da moldura escolhida.
@@ -69,9 +74,11 @@ async def buscar(carta: ScryfallCard, aspecto_da_janela: float | None = None) ->
         if referencia is None:
             return None
 
-        arte = await _melhor_do_mtgpics(client, carta, referencia)
-        if arte is not None:
-            arte = _sem_carimbo(arte)
+        arte = None
+        if usar_mtgpics:
+            arte = await _melhor_do_mtgpics(client, carta, referencia)
+            if arte is not None:
+                arte = _sem_carimbo(arte)
         if arte is None or not _vale_a_pena(arte, referencia, aspecto_da_janela, carta):
             arte = referencia
         return _data_url(arte)
@@ -101,9 +108,7 @@ def _distancia_do_aspecto(imagem: bytes, janela: float) -> float | None:
     return abs(log(aspecto / janela))
 
 
-def _vale_a_pena(
-    arte: bytes, referencia: bytes, janela: float | None, carta: ScryfallCard
-) -> bool:
+def _vale_a_pena(arte: bytes, referencia: bytes, janela: float | None, carta: ScryfallCard) -> bool:
     """Se a arte do MTGPics ganha do art_crop pra esta moldura."""
     if janela is not None:
         do_mtgpics = _distancia_do_aspecto(arte, janela)
@@ -196,9 +201,7 @@ async def _melhor_do_mtgpics(
 
     pagina = await _pagina_da_carta(client, carta)
     if pagina is None:
-        logger.info(
-            "%s: o MTGPics nao confirmou a carta, usando o art_crop", carta.nome_exibido
-        )
+        logger.info("%s: o MTGPics nao confirmou a carta, usando o art_crop", carta.nome_exibido)
         return None
 
     miniaturas = _miniaturas(pagina)
@@ -223,8 +226,7 @@ async def _melhor_do_mtgpics(
         semelhanca = _semelhanca_de_cor(imagem, referencia)
         if semelhanca < SEMELHANCA_MINIMA:
             logger.info(
-                "%s: a arte %s/%s do MTGPics tem outra paleta (%.2f), e outra "
-                "ilustracao",
+                "%s: a arte %s/%s do MTGPics tem outra paleta (%.2f), e outra ilustracao",
                 carta.nome_exibido,
                 edicao,
                 numero,
@@ -243,6 +245,7 @@ async def _melhor_do_mtgpics(
             carta.artist,
         )
         return None
+
     # A da propria impressao vem primeiro; sem ela decide a menor distancia do
     # grupo. Dentro do grupo vencedor vale a imagem maior: reduzir a mesma arte
     # mexe na assinatura o bastante pra versao pequena parecer mais parecida.
@@ -291,7 +294,7 @@ async def _pagina_do_ref(client: httpx.AsyncClient, ref: str) -> str | None:
         resposta = await client.get(f"{BASE_MTGPICS}/card", params={"ref": ref})
     except httpx.HTTPError:
         return None
-    return resposta.text if resposta.status_code == 200 else None
+    return resposta.text if resposta.status_code == httpx.codes.OK else None
 
 
 async def _ref_por_nome(client: httpx.AsyncClient, nome: str) -> str | None:
@@ -304,7 +307,7 @@ async def _ref_por_nome(client: httpx.AsyncClient, nome: str) -> str | None:
         )
     except httpx.HTTPError:
         return None
-    if resposta.status_code != 200:
+    if resposta.status_code != httpx.codes.OK:
         return None
     achado = _REF_DO_RESULTADO.search(resposta.text)
     return achado.group(1).lower() if achado else None
@@ -344,7 +347,7 @@ async def _e_do_ilustrador(client: httpx.AsyncClient, ident: str, artista: str |
         resposta = await client.get(f"{BASE_MTGPICS}/load_illus", params={"i": ident})
     except httpx.HTTPError:
         return False
-    if resposta.status_code != 200:
+    if resposta.status_code != httpx.codes.OK:
         return False
     achado = _ILUSTRADOR.search(resposta.text)
     if achado is None:
@@ -353,9 +356,7 @@ async def _e_do_ilustrador(client: httpx.AsyncClient, ident: str, artista: str |
     return do_site in do_scryfall or do_scryfall in do_site
 
 
-async def _art_crop_em_ingles(
-    client: httpx.AsyncClient, carta: ScryfallCard
-) -> bytes | None:
+async def _art_crop_em_ingles(client: httpx.AsyncClient, carta: ScryfallCard) -> bytes | None:
     """O art_crop da impressao em ingles - serve de reserva e de gabarito.
 
     Impressao em portugues paga uma requisicao a mais porque o art_crop dela
@@ -367,7 +368,7 @@ async def _art_crop_em_ingles(
             resposta = await client.get(
                 f"{BASE_SCRYFALL}/cards/{carta.set}/{carta.collector_number}/en"
             )
-            if resposta.status_code == 200:
+            if resposta.status_code == httpx.codes.OK:
                 url = (resposta.json().get("image_uris") or {}).get("art_crop") or url
         except httpx.HTTPError:
             pass
@@ -381,7 +382,7 @@ async def _baixar_imagem(client: httpx.AsyncClient, url: str) -> bytes | None:
         resposta = await client.get(url)
     except httpx.HTTPError:
         return None
-    if resposta.status_code != 200:
+    if resposta.status_code != httpx.codes.OK:
         return None
     if not resposta.headers.get("content-type", "").startswith("image/"):
         return None
@@ -521,7 +522,7 @@ def _assinatura(imagem: bytes) -> int | None:
             (altura + lado) // 2,
         )
     )
-    pixels = list(quadrado.resize((9, 8), Image.LANCZOS).getdata())
+    pixels = list(quadrado.resize((9, 8), Image.Resampling.LANCZOS).getdata())
 
     bits = 0
     for linha in range(8):

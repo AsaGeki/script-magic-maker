@@ -8,6 +8,7 @@ de 1 `asyncio.run()` so, ver main().
 """
 
 import asyncio
+import contextlib
 import re
 from pathlib import Path
 
@@ -18,13 +19,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from app.cards import fichas
 from app.cards.estruturais import (
     DeckEstrutural,
     buscar_entradas_do_deck,
     list_decks_estruturais,
     list_tipos_estruturais,
 )
-from app.cards import fichas
 from app.cards.fichas import FichaDoDeck
 from app.cards.models import ScryfallCard
 from app.cards.service import (
@@ -34,18 +35,19 @@ from app.cards.service import (
     completar_traducao_pos_corte,
     e_terreno_basico,
     find_card_by_print,
-    preferir_traducao_do_arena,
-    traduzir_terreno_basico,
     find_cards_by_set,
     list_sets,
+    preferir_traducao_do_arena,
     search_cards,
     search_cards_by_term,
     suggest_names,
+    traduzir_terreno_basico,
 )
 from app.cli.preview import descrever_impressao, escolher_impressao, mostrar_ficha
 from app.cli.stdio import configurar_stdio_utf8
 from app.cli.tempo import cronometrar
-from app.config import CARDCONJURER_URL, HEADLESS, OUTPUT_DIR
+from app.config import HEADLESS, OUTPUT_DIR
+from app.deck import legalidade
 from app.deck.service import buscar_cartas_do_deck, juntar_impressoes_repetidas
 from app.deck.texto import (
     Chave,
@@ -58,16 +60,13 @@ from app.deck.texto import (
 from app.errors import AppError
 from app.maker.service import (
     MOLDURAS,
-    MOLDURA_PADRAO,
     PASTA_CARTAS_AVULSAS,
     fill_card,
     moldura_sugerida,
     nome_da_moldura,
 )
-from app.deck import legalidade
-from app.print import layout
+from app.print import layout, verso
 from app.print import pdf as print_pdf
-from app.print import verso
 from app.print.service import (
     conferir_copias,
     copias_da_lista,
@@ -94,11 +93,12 @@ VOLTAR = "Voltar"
 # subpasta dentro de DECKS_DIR.
 DECKS_DIR = Path(OUTPUT_DIR) / "decks"
 
+# Quantas vezes uma carta do lote e tentada antes de ficar de fora.
+TENTATIVAS_POR_CARTA = 2
+
 
 def mostrar_banner() -> None:
-    console.print(
-        f"[bold cyan]{pyfiglet.figlet_format('Magic Maker', font='slant')}[/]"
-    )
+    console.print(f"[bold cyan]{pyfiglet.figlet_format('Magic Maker', font='slant')}[/]")
 
 
 def _mostrar_tabela(cartas: list[ScryfallCard]) -> None:
@@ -137,7 +137,11 @@ async def _gerar_uma(
     if preferir_arena is None:
         preferir_arena = preferir_traducao_do_arena(carta)
     if not carta.traduzida and not carta.printed_name:
-        se_arena = "usando traducao do MTG Arena (nao impressa)" if preferir_arena else "vai sair em ingles"
+        se_arena = (
+            "usando traducao do MTG Arena (nao impressa)"
+            if preferir_arena
+            else "vai sair em ingles"
+        )
         cor = "magenta" if preferir_arena else "red"
         console.print(f'  [{cor}]![/] "{carta.nome_exibido}" sem impressao PT - {se_arena}')
     if (
@@ -178,22 +182,37 @@ async def _gerar_varias(
         try:
             for indice, carta in enumerate(cartas, start=1):
                 console.rule(f"{indice}/{len(cartas)}: {carta.nome_exibido}")
-                try:
-                    destino = await _gerar_uma(
-                        carta,
-                        browser=browser,
-                        confirmar=False,
-                        pasta_destino=pasta_destino,
-                        moldura=moldura,
-                        preferir_arena=preferir_arena,
-                    )
-                except AppError as erro:
-                    console.print(f"  [red]![/] {erro.message}")
-                    continue
+                for tentativa in range(1, TENTATIVAS_POR_CARTA + 1):
+                    try:
+                        destino = await _gerar_uma(
+                            carta,
+                            browser=browser,
+                            confirmar=False,
+                            pasta_destino=pasta_destino,
+                            moldura=moldura,
+                            preferir_arena=preferir_arena,
+                        )
+                        break
+                    except AppError as erro:
+                        console.print(f"  [red]![/] {erro.message}")
+                        destino = None
+                        break
+                    except Exception as erro:  # noqa: BLE001 - Chromium pode
+                        # cair no meio do lote (ver BrowserContext.close); 1
+                        # carta ruim nao pode derrubar as outras 17.
+                        console.print(f"  [red]![/] Erro inesperado: {erro}")
+                        destino = None
+                        if tentativa == TENTATIVAS_POR_CARTA:
+                            break
+                        console.print("  Reabrindo o navegador para tentar de novo...")
+                        with contextlib.suppress(Exception):
+                            await browser.close()
+                        browser = await p.chromium.launch(headless=HEADLESS)
                 if destino is not None:
                     geradas.append((destino, carta.copias))
         finally:
-            await browser.close()
+            with contextlib.suppress(Exception):
+                await browser.close()
             servidor.stop()
     return geradas
 
@@ -209,9 +228,7 @@ async def _confirmar_moldura(carta: ScryfallCard) -> str | None:
     console.print(f"  Moldura: [bold]{NOME_DA_MOLDURA.get(sugerida, sugerida)}[/]")
     if not await questionary.confirm("Trocar a moldura?", default=False).ask_async():
         return sugerida
-    escolha = await questionary.select(
-        "Qual moldura?", choices=[*MOLDURAS, VOLTAR]
-    ).ask_async()
+    escolha = await questionary.select("Qual moldura?", choices=[*MOLDURAS, VOLTAR]).ask_async()
     if escolha is None or escolha == VOLTAR:
         return sugerida
     return MOLDURAS[escolha]
@@ -377,9 +394,7 @@ async def _fluxo_carta_por_edicao() -> None:
             )
             for e in edicoes
         ]
-        alternar = (
-            "So as que tem portugues" if todas else "Ver tambem as sem portugues"
-        )
+        alternar = "So as que tem portugues" if todas else "Ver tambem as sem portugues"
         escolha = await questionary.select(
             "Qual edicao?", choices=[*opcoes, alternar, VOLTAR]
         ).ask_async()
@@ -406,9 +421,7 @@ async def _fluxo_carta_por_edicao() -> None:
             f"  [yellow]![/] {escolha['name']} ({codigo.upper()}) nao tem carta "
             f"em portugues{motivo}."
         )
-        if not await questionary.confirm(
-            "Listar as cartas em ingles?", default=False
-        ).ask_async():
+        if not await questionary.confirm("Listar as cartas em ingles?", default=False).ask_async():
             return
         async with cronometrar(console, f"Buscando cartas de {codigo.upper()} em inglês"):
             cartas = await find_cards_by_set(codigo, lang="en")
@@ -489,9 +502,7 @@ async def _escolher_fichas(cartas: list[ScryfallCard]) -> list[ScryfallCard]:
     marcadas = await questionary.checkbox(
         "Gerar quais fichas?",
         choices=[
-            questionary.Choice(
-                f"{_nome_da_ficha(ficha)} - de {', '.join(ficha.criada_por)}", ficha
-            )
+            questionary.Choice(f"{_nome_da_ficha(ficha)} - de {', '.join(ficha.criada_por)}", ficha)
             for ficha in achadas
         ],
     ).ask_async()
@@ -510,7 +521,9 @@ async def _escolher_fichas(cartas: list[ScryfallCard]) -> list[ScryfallCard]:
     return escolhidas
 
 
-async def _finalizar_fluxo_deck(cartas: list[ScryfallCard], nome_do_deck: str, pasta_destino: Path) -> None:
+async def _finalizar_fluxo_deck(
+    cartas: list[ScryfallCard], nome_do_deck: str, pasta_destino: Path
+) -> None:
     """Rabo comum a todo fluxo de deck depois de resolvido no Scryfall: mostra
     checkbox de selecao, gera as escolhidas e oferece montar o PDF com as
     copias que o deck pede."""
@@ -592,9 +605,7 @@ async def _fluxo_deck_estrutural() -> None:
     decks = await list_decks_estruturais(tipo)
     escolhido: DeckEstrutural | None = await questionary.select(
         "Qual deck?",
-        choices=[
-            questionary.Choice(f"{d.nome} ({d.released_at[:4]})", d) for d in decks
-        ]
+        choices=[questionary.Choice(f"{d.nome} ({d.released_at[:4]})", d) for d in decks]
         + [VOLTAR],
     ).ask_async()
     if escolhido is None or escolhido == VOLTAR:
@@ -641,7 +652,7 @@ async def _sincronizar_pasta(pasta: Path) -> None:
     ignorados: list[str] = []
 
     async with cronometrar(console, f"Relendo as cartas de {rotulo}"):
-        for imagem in sorted(pasta.glob("*.png")):
+        for imagem in sorted(pasta.glob("*.png")):  # noqa: ASYNC240 - pasta local
             impressao = impressao_do_arquivo(imagem.name)
             carta = None
             if impressao is not None:
@@ -797,7 +808,8 @@ async def _escolher_cartas_para_imprimir() -> list[tuple[Path, int]]:
     pares = [par for grupo in escolhidos for par in grupo]
 
     resultado: list[tuple[Path, int]] = []
-    for caminho, copias in pares:
+    for caminho, do_metadata in pares:
+        copias = do_metadata
         if copias is None:
             resposta = await questionary.text(
                 f"Quantas copias de {caminho.stem}?",
@@ -831,9 +843,7 @@ async def _fluxo_montar_pdf() -> None:
 
 
 async def _fluxo_preview() -> None:
-    console.print(
-        Panel(INSTRUCOES_PREVIEW, title="Prova de impressao", border_style="yellow")
-    )
+    console.print(Panel(INSTRUCOES_PREVIEW, title="Prova de impressao", border_style="yellow"))
     pares = await _escolher_cartas_para_imprimir()
     if not pares:
         return
@@ -871,9 +881,7 @@ FLUXOS_IMPRIMIR = {
 
 async def _rodar_submenu(titulo: str, fluxos: dict) -> None:
     while True:
-        escolha = await questionary.select(
-            titulo, choices=[*fluxos, VOLTAR]
-        ).ask_async()
+        escolha = await questionary.select(titulo, choices=[*fluxos, VOLTAR]).ask_async()
         if escolha is None or escolha == VOLTAR:
             return
         try:
