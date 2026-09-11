@@ -5,6 +5,7 @@ Uma "folha" e uma Image do Pillow representando a pagina A4 inteira; o pdf.py
 so consome essa lista, sem saber nada de grade nem de milimetro.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -98,25 +99,25 @@ def _nova_folha() -> Image.Image:
 
 def montar_folhas_frente(
     caminhos_cartas: list[Path], *, marca_corte: bool = True
-) -> list[Image.Image]:
-    """Monta 1 ou mais folhas A4 com as cartas em grade 3x3, na ordem recebida
-    (9 por folha). A ultima folha fica com celulas em branco se o total nao for
-    multiplo de 9."""
-    folhas: list[Image.Image] = []
+) -> Iterator[Image.Image]:
+    """Folhas A4 com as cartas em grade 3x3, na ordem recebida (9 por folha).
+
+    Uma por vez: a folha ocupa ~104 MB descomprimida, entao segurar o deck
+    inteiro na memoria custaria gigabytes. A ultima fica com celulas em branco
+    se o total nao for multiplo de 9."""
     for inicio in range(0, len(caminhos_cartas), CARTAS_POR_FOLHA):
         lote = caminhos_cartas[inicio : inicio + CARTAS_POR_FOLHA]
         folha = _nova_folha()
         for (x, y), caminho in zip(_posicoes_grade(), lote, strict=False):
-            carta = (
-                Image.open(caminho)
-                .convert("RGB")
-                .resize((CARTA_LARGURA_PX, CARTA_ALTURA_PX), Image.Resampling.LANCZOS)
-            )
+            with Image.open(caminho) as aberta:
+                carta = aberta.convert("RGB").resize(
+                    (CARTA_LARGURA_PX, CARTA_ALTURA_PX), Image.Resampling.LANCZOS
+                )
             folha.paste(carta, (x, y))
+            carta.close()
         if marca_corte:
             _desenhar_linhas_de_corte(ImageDraw.Draw(folha))
-        folhas.append(folha)
-    return folhas
+        yield folha
 
 
 def montar_folha_repetida(celula: Image.Image, *, marca_corte: bool = True) -> Image.Image:

@@ -117,9 +117,15 @@ async def _enriquecer_com_arena(cartas: list[ScryfallCard]) -> None:
 
 
 async def search_cards(nome: str, lang: str = "pt") -> list[ScryfallCard]:
-    """Todas as impressoes de um nome exato, no idioma pedido."""
+    """Todas as impressoes de um nome exato, no idioma pedido.
+
+    Passa pelo _impressoes_por_nome, e nao pelo _buscar cru, pra ter a mesma
+    saida pelo MTGJSON que o find_card_by_name: uma lista de deck grande leva
+    429 no meio, e sem isso o fluxo do menu morria com o banco local pronto
+    em disco.
+    """
     async with _cliente() as client:
-        return await _buscar(client, f'!"{nome}"', lang)
+        return await _impressoes_por_nome(client, nome, lang)
 
 
 async def search_cards_by_term(termo: str, limite: int = 30) -> list[ScryfallCard]:
@@ -330,33 +336,36 @@ async def completar_traducao_pos_corte(carta: ScryfallCard) -> None:
     if carta.lang != "en" or carta.printed_name or e_terreno_basico(carta):
         return
 
+    # As irmas em portugues servem ao nome, ao texto e a historia: uma consulta
+    # so, reaproveitada pelos tres.
     async with _cliente() as client:
         irmas = await _impressoes_por_nome(client, carta.name, "pt")
-    com_traducao = [irma for irma in irmas if irma.printed_name]
-    if com_traducao:
-        # Nome e texto saem da MESMA irma: o texto de regras repete o nome da
-        # carta, e misturar duas impressoes deixa os dois discordando.
-        mais_recente = max(com_traducao, key=lambda irma: irma.released_at or date.min)
-        carta.printed_name = mais_recente.printed_name
-        carta.printed_text = mais_recente.printed_text
 
-    if carta.arena and (not carta.printed_name or not carta.printed_text):
-        carta.printed_name = carta.printed_name or carta.arena.nome
-        carta.printed_text = carta.printed_text or carta.arena.texto
+        com_traducao = [irma for irma in irmas if irma.printed_name]
+        if com_traducao:
+            # Nome e texto saem da MESMA irma: o texto de regras repete o nome
+            # da carta, e misturar duas impressoes deixa os dois discordando.
+            mais_recente = max(com_traducao, key=lambda irma: irma.released_at or date.min)
+            carta.printed_name = mais_recente.printed_name
+            carta.printed_text = mais_recente.printed_text
 
-    if not carta.printed_name:
-        return
-    if not carta.printed_type_line:
-        async with _cliente() as client:
+        if carta.arena and (not carta.printed_name or not carta.printed_text):
+            carta.printed_name = carta.printed_name or carta.arena.nome
+            carta.printed_text = carta.printed_text or carta.arena.texto
+
+        if not carta.printed_name:
+            return
+        if not carta.printed_type_line:
             carta.printed_type_line = await _linha_de_tipo_equivalente(client, carta.type_line)
-    if carta.flavor_text:
-        async with _cliente() as client:
-            equivalente = await _flavor_equivalente(client, carta)
-        do_arena = carta.arena.flavor_text if carta.arena else None
-        carta.flavor_text = equivalente or do_arena or carta.flavor_text
+        if carta.flavor_text:
+            equivalente = await _flavor_equivalente(client, carta, irmas)
+            do_arena = carta.arena.flavor_text if carta.arena else None
+            carta.flavor_text = equivalente or do_arena or carta.flavor_text
 
 
-async def _flavor_equivalente(client: httpx.AsyncClient, carta: ScryfallCard) -> str | None:
+async def _flavor_equivalente(
+    client: httpx.AsyncClient, carta: ScryfallCard, em_portugues: list[ScryfallCard]
+) -> str | None:
     """A historia em portugues da irma que conta a MESMA historia em ingles.
 
     Historia e escrita por impressao, nao por carta: cada reimpressao pode
@@ -365,7 +374,6 @@ async def _flavor_equivalente(client: httpx.AsyncClient, carta: ScryfallCard) ->
     irma em portugues o campo ja veio traduzido. Sem irma que bata, devolve
     None e o chamador fica com o ingles.
     """
-    em_portugues = await _impressoes_por_nome(client, carta.name, "pt")
     candidatas = [irma for irma in em_portugues if irma.flavor_text]
     if not candidatas:
         return None

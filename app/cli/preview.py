@@ -15,6 +15,7 @@ from term_image.image import AutoImage
 from app.cards.models import ScryfallCard
 from app.cards.service import e_terreno_basico
 from app.config import SCRYFALL_USER_AGENT
+from app.errors import NotFoundError
 from app.maker.service import nome_da_moldura
 
 console = Console()
@@ -168,6 +169,8 @@ MAXIMO_COM_ARTE = 12
 async def escolher_impressao(impressoes: list[ScryfallCard]) -> ScryfallCard:
     """Se so ha 1 impressao, devolve ela direto. Se ha mais (reimpressao com
     arte alternativa), mostra o preview de cada uma e deixa escolher."""
+    if not impressoes:
+        raise NotFoundError("Nenhuma impressao pra escolher")
     if len(impressoes) == 1:
         return impressoes[0]
 

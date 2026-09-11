@@ -2,6 +2,7 @@
 monta as folhas (layout.py). Consumido pelo menu (app.cli.menu), sem nenhum
 questionary aqui - so a logica de montagem."""
 
+from collections.abc import Iterator
 from pathlib import Path
 
 from PIL import Image
@@ -154,6 +155,6 @@ def impressao_do_arquivo(nome: str) -> tuple[str, str] | None:
             return None
 
 
-def montar_lote(caminhos_cartas: list[Path], *, marca_corte: bool = True) -> list[Image.Image]:
-    """Folhas de frente prontas pro pdf.exportar_pdf."""
+def montar_lote(caminhos_cartas: list[Path], *, marca_corte: bool = True) -> Iterator[Image.Image]:
+    """Folhas de frente prontas pro pdf.exportar_pdf, uma a uma."""
     return layout.montar_folhas_frente(caminhos_cartas, marca_corte=marca_corte)
