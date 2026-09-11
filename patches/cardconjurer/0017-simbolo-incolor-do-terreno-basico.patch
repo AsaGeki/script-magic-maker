@@ -1,0 +1,12 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -1921,5 +1921,7 @@ async function autoTextlessBasics2022Frame(colors, mana_cost, type_line, powe
+ 	var snow = type_line.toLowerCase().includes('snow') && 'WUBRG'.includes(letter);
+ 	// O multicolorido nao tem simbolo proprio no pacote.
+-	var symbolFile = letter == 'M' ? 'c' : frameFiles[letter];
++	/* script-magic-maker: simbolo-incolor-do-terreno-basico */
++	// O fundo incolor e l.png, mas o simbolo correspondente e sc.png (nao sl.png).
++	var symbolFile = 'MC'.includes(letter) ? 'c' : frameFiles[letter];
+ 
+ 	var frames = [
