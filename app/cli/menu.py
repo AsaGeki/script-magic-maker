@@ -95,6 +95,10 @@ VOLTAR = "Voltar"
 # subpasta dentro de DECKS_DIR.
 DECKS_DIR = Path(OUTPUT_DIR) / "decks"
 
+# Quantas cartas tem a traducao completada ao mesmo tempo, igual ao que o
+# app.deck.service usa pra resolver a lista.
+CONSULTAS_SIMULTANEAS = 5
+
 # Quantas vezes uma carta do lote e tentada antes de ficar de fora.
 TENTATIVAS_POR_CARTA = 2
 
@@ -265,6 +269,26 @@ async def _confirmar_moldura(carta: ScryfallCard) -> str | None:
     return MOLDURAS[escolha]
 
 
+async def _completar_traducoes(cartas: list[ScryfallCard]) -> None:
+    """Enche os campos em portugues que faltam, varias cartas ao mesmo tempo.
+
+    Cada carta e independente das outras e as quatro chamadas so mexem nela,
+    entao da pra resolver em paralelo. O ritmo entre as requisicoes e global
+    (ver app.rede.respeitar_ritmo): o paralelismo sobrepoe a espera da rede sem
+    furar o limite do Scryfall.
+    """
+    semaforo = asyncio.Semaphore(CONSULTAS_SIMULTANEAS)
+
+    async def completar(carta: ScryfallCard) -> None:
+        async with semaforo:
+            await traduzir_terreno_basico(carta)
+            await completar_traducao_pos_corte(carta)
+            await completar_traducao_parcial(carta)
+            await completar_moldura_do_ingles(carta)
+
+    await asyncio.gather(*(completar(carta) for carta in cartas))
+
+
 async def _escolher_e_gerar(
     cartas: list[ScryfallCard],
     *,
@@ -278,11 +302,7 @@ async def _escolher_e_gerar(
     if not cartas:
         console.print("  [red]![/] Nenhuma carta encontrada.")
         return []
-    for carta in cartas:
-        await traduzir_terreno_basico(carta)
-        await completar_traducao_pos_corte(carta)
-        await completar_traducao_parcial(carta)
-        await completar_moldura_do_ingles(carta)
+    await _completar_traducoes(cartas)
     _mostrar_tabela(cartas)
     sufixo = " (ja vem todas marcadas)" if pre_marcadas else ""
     escolhidas = await questionary.checkbox(

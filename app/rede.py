@@ -11,6 +11,7 @@ excecao (app.cards.service) ou log com degradacao (app.deck.legalidade).
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
@@ -36,6 +37,33 @@ ESPERA_MAXIMA_429 = 2.0
 SEGUNDOS_POR_DIA = 86400
 
 
+@dataclass
+class _Ritmo:
+    """Quando a ultima requisicao saiu, pra espacar a proxima."""
+
+    ultima: float = 0.0
+
+
+_ritmo = _Ritmo()
+_trava_do_ritmo = asyncio.Lock()
+
+
+async def respeitar_ritmo() -> None:
+    """Segura a chamada ate passar o intervalo minimo desde a ultima requisicao.
+
+    Um `sleep` dentro de cada chamada nao limita nada quando ha concorrencia:
+    num `asyncio.gather`, todas dormem ao mesmo tempo e disparam juntas. A
+    trava serializa so a decisao de quando soltar - a requisicao em si segue
+    em paralelo com as outras.
+    """
+    async with _trava_do_ritmo:
+        relogio = asyncio.get_running_loop().time
+        espera = _ritmo.ultima + INTERVALO_ENTRE_REQUISICOES - relogio()
+        if espera > 0:
+            await asyncio.sleep(espera)
+        _ritmo.ultima = relogio()
+
+
 def _espera_do_429(resposta: httpx.Response, tentativa: int) -> float:
     return min(float(resposta.headers.get("Retry-After", 1 + tentativa)), ESPERA_MAXIMA_429)
 
@@ -50,7 +78,7 @@ async def com_retentativa_no_429(
     derruba a operacao ou vira degradacao.
     """
     for tentativa in range(MAX_TENTATIVAS_429):
-        await asyncio.sleep(INTERVALO_ENTRE_REQUISICOES)
+        await respeitar_ritmo()
         resposta = await requisicao()
         if resposta.status_code != httpx.codes.TOO_MANY_REQUESTS:
             return resposta

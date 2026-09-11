@@ -12,7 +12,6 @@ A linha de tipo e montada peca por peca (ver `_linha_de_tipo_em_portugues`):
 nenhuma fonte tem ela pronta.
 """
 
-import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -109,7 +108,7 @@ async def descobrir(cartas: list[ScryfallCard]) -> list[FichaDoDeck]:
 
 async def _partes_de_ficha(client: httpx.AsyncClient, carta: ScryfallCard) -> list[dict]:
     """As entradas de ficha do all_parts, lidas da impressao em ingles."""
-    await asyncio.sleep(rede.INTERVALO_ENTRE_REQUISICOES)
+    await rede.respeitar_ritmo()
     try:
         resposta = await client.get(
             f"{BASE_SCRYFALL}/cards/{carta.set}/{carta.collector_number}/en"
@@ -195,7 +194,7 @@ async def _metade_traduzida(
     Comparar a metade inteira evita casar "Artifact" com "Artifact Creature".
     """
     consulta = " ".join(f't:"{palavra}"' for palavra in em_ingles.split())
-    await asyncio.sleep(rede.INTERVALO_ENTRE_REQUISICOES)
+    await rede.respeitar_ritmo()
     try:
         resposta = await client.get(
             f"{BASE_SCRYFALL}/cards/search",

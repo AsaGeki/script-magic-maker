@@ -209,8 +209,12 @@ OPACIDADE_DA_MARCA_DAGUA = 100
 # Status a partir do qual a resposta do navegador vira aviso no log.
 PRIMEIRO_STATUS_DE_ERRO = 400
 
-INTERVALO_AMOSTRA = 0.3
-AMOSTRAS_IGUAIS = 3  # leituras seguidas sem mudanca = desenho terminou
+INTERVALO_AMOSTRA = 0.1
+# Tempo sem mudanca que conta como desenho terminado. Medido em tempo, e nao
+# em numero de leituras, pra separar de que em quanto em quanto se olha do
+# quanto se espera pra ter certeza - com o navegador ocupado as leituras ja
+# saem espacadas sozinhas, porque o evaluate espera a thread da pagina.
+JANELA_ESTAVEL = 0.5
 TEMPO_LIMITE_DESENHO = 45.0
 TEMPO_LIMITE_ELEMENTO = 30_000  # milissegundos, como o Playwright espera
 
@@ -435,18 +439,18 @@ async def _esperar_desenho(page: Page) -> None:
     O gerador nao avisa quando terminou: arte, simbolo de expansao e camadas de
     moldura chegam cada um no seu tempo.
     """
-    limite = asyncio.get_running_loop().time() + TEMPO_LIMITE_DESENHO
+    relogio = asyncio.get_running_loop().time
+    limite = relogio() + TEMPO_LIMITE_DESENHO
     anterior = None
-    iguais = 0
-    while asyncio.get_running_loop().time() < limite:
+    ultima_mudanca = relogio()
+    while relogio() < limite:
         atual = await page.evaluate(_IMPRESSAO_DIGITAL)
-        if atual is not None and atual == anterior:
-            iguais += 1
-            if iguais >= AMOSTRAS_IGUAIS:
-                return
-        else:
-            iguais = 0
-        anterior = atual
+        agora = relogio()
+        if atual is None or atual != anterior:
+            anterior = atual
+            ultima_mudanca = agora
+        elif agora - ultima_mudanca >= JANELA_ESTAVEL:
+            return
         await asyncio.sleep(INTERVALO_AMOSTRA)
     raise UpstreamError(f"O desenho nao estabilizou em {TEMPO_LIMITE_DESENHO:.0f}s")
 

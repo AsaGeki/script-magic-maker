@@ -2,6 +2,7 @@
 Scryfall. Sem nenhum questionary aqui - quem pergunta e o menu (app.cli.menu).
 """
 
+import asyncio
 import logging
 
 from app.cards.models import ScryfallCard
@@ -16,6 +17,11 @@ from app.errors import AppError
 from app.slug import slug
 
 logger = logging.getLogger(__name__)
+
+# Quantas linhas da lista sao resolvidas ao mesmo tempo. O ritmo entre as
+# requisicoes e global (ver app.rede.respeitar_ritmo), entao o paralelismo
+# sobrepoe a espera da rede sem furar o limite do Scryfall.
+CONSULTAS_SIMULTANEAS = 5
 
 
 async def buscar_cartas_do_deck(
@@ -33,19 +39,29 @@ async def buscar_cartas_do_deck(
     pode estar errado (SDL no lugar de SLD) ou a impressao pode nao existir em
     portugues, e nos dois casos o deck sai diferente do que a lista pediu.
     """
+    semaforo = asyncio.Semaphore(CONSULTAS_SIMULTANEAS)
+
+    async def resolver(entrada: EntradaDeDeck) -> ScryfallCard | str:
+        """A carta da linha, ou o aviso que explica por que ela nao veio."""
+        async with semaforo:
+            try:
+                return await _resolver(entrada, permitir_ingles)
+            except AppError as erro:
+                return f"{entrada.nome}: {erro.message}"
+
+    resultados = await asyncio.gather(*(resolver(entrada) for entrada in entradas))
+
     pares: list[tuple[EntradaDeDeck, ScryfallCard]] = []
     avisos: list[str] = []
-
-    for entrada in entradas:
-        try:
-            carta = await _resolver(entrada, permitir_ingles)
-        except AppError as erro:
-            avisos.append(f"{entrada.nome}: {erro.message}")
+    # A ordem da lista e a ordem do deck: o gather devolve na ordem das entradas.
+    for entrada, resultado in zip(entradas, resultados, strict=True):
+        if isinstance(resultado, str):
+            avisos.append(resultado)
             continue
-        if trocada := _impressao_trocada(entrada, carta):
+        if trocada := _impressao_trocada(entrada, resultado):
             avisos.append(trocada)
-        carta.copias = entrada.quantidade
-        pares.append((entrada, carta))
+        resultado.copias = entrada.quantidade
+        pares.append((entrada, resultado))
 
     return pares, avisos
 
