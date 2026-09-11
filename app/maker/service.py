@@ -168,12 +168,6 @@ LAYOUTS_DE_DUAS_FACES = frozenset(
     }
 )
 
-# Layout que reparte a carta em duas metades com nome, custo e texto proprios.
-# A moldura normal so tem lugar pra uma delas, entao a outra sumiria: melhor
-# recusar. Layout que so muda o desenho (saga, classe, plano...) passa, com o
-# texto todo na caixa de regras.
-LAYOUTS_QUE_PERDEM_TEXTO: frozenset[Layout] = frozenset()
-
 _IMPRESSAO_DIGITAL = carregar("impressao-digital")
 
 _SELECIONAR_IMPRESSAO = carregar("selecionar-impressao")
@@ -804,11 +798,6 @@ async def fill_card(
         raise BadRequestError(
             f"{carta.nome_exibido} e uma carta de {carta.layout}, que rende duas "
             "imagens; o gerador aqui ainda produz uma face so"
-        )
-    if carta.layout in LAYOUTS_QUE_PERDEM_TEXTO:
-        raise BadRequestError(
-            f"{carta.nome_exibido} tem layout {carta.layout}, que reparte a carta em "
-            "duas metades; a moldura normal so comporta uma delas"
         )
     if _e_planeswalker(carta):
         raise BadRequestError(

@@ -12,11 +12,14 @@ from rich.console import Console
 from rich.panel import Panel
 from term_image.image import AutoImage
 
+from app import rede
 from app.cards.models import ScryfallCard
 from app.cards.service import e_terreno_basico
-from app.config import SCRYFALL_USER_AGENT
 from app.errors import NotFoundError
 from app.maker.service import nome_da_moldura
+
+# A arte do preview e so pra olhar; nao vale segurar o menu por muito tempo.
+TIMEOUT_DA_ARTE = 20.0
 
 console = Console()
 
@@ -105,7 +108,7 @@ async def _baixar_artes(urls: list[str | None]) -> list[bytes | None]:
     desenha o que ja esta em memoria.
     """
     async with httpx.AsyncClient(
-        timeout=20.0, follow_redirects=True, headers={"User-Agent": SCRYFALL_USER_AGENT}
+        timeout=TIMEOUT_DA_ARTE, follow_redirects=True, headers=rede.CABECALHOS_DE_ARQUIVO
     ) as client:
 
         async def baixar(url: str | None) -> bytes | None:

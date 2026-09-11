@@ -38,22 +38,13 @@ from app.slug import slug
 from app.vendor.server import ServidorCardConjurer
 
 
-def _e_ficha(carta: ScryfallCard) -> bool:
-    return (carta.type_line or "").strip().lower().startswith(("token", "emblem"))
-
-
 async def _com_fichas_traduzidas(cartas: list[ScryfallCard]) -> list[ScryfallCard]:
     """Troca cada ficha da lista pela versão que o app.cards.fichas enriquece.
 
     A tradução da ficha sai da carta que a cria, então ela precisa da lista
     toda; sem isso, ficha entra em inglês.
     """
-    if not any(_e_ficha(carta) for carta in cartas):
-        return cartas
-    criadoras = [carta for carta in cartas if not _e_ficha(carta)]
-    enriquecidas = {}
-    for achada in await fichas.descobrir(criadoras):
-        enriquecidas[(achada.carta.set, achada.carta.collector_number)] = achada.carta
+    enriquecidas = await fichas.enriquecidas_por_impressao(cartas)
     return [enriquecidas.get((carta.set, carta.collector_number), carta) for carta in cartas]
 
 

@@ -10,9 +10,9 @@ from typing import Any
 
 import httpx
 
+from app import rede
 from app.cards import arena, mtgjson
 from app.cards.models import ScryfallCard
-from app.config import SCRYFALL_USER_AGENT
 from app.errors import ConflictError, NotFoundError, UpstreamError
 
 BASE_URL = "https://api.scryfall.com"
@@ -25,42 +25,28 @@ TIPOS_DE_EDICAO_IGNORADOS = frozenset(
     {"token", "memorabilia", "minigame", "vanguard", "planar", "treasure_chest"}
 )
 
-# O Scryfall pede ~100ms entre requisicoes; respeitado antes de cada chamada.
-INTERVALO_ENTRE_REQUISICOES = 0.1
-TIMEOUT = 30.0
 
 # Edicoes checadas em paralelo em list_sets, bem abaixo do limite de 10 req/s.
 TAMANHO_DO_LOTE = 5
 
 logger = logging.getLogger(__name__)
 
-CABECALHOS = {"User-Agent": SCRYFALL_USER_AGENT, "Accept": "application/json"}
-
 
 def _cliente() -> httpx.AsyncClient:
-    return httpx.AsyncClient(base_url=BASE_URL, timeout=TIMEOUT, headers=CABECALHOS)
-
-
-MAX_TENTATIVAS_429 = 3
-ESPERA_MAXIMA_429 = 2.0
+    return httpx.AsyncClient(
+        base_url=BASE_URL, timeout=rede.TIMEOUT_PADRAO, headers=rede.CABECALHOS_DE_API
+    )
 
 
 async def _get(
     client: httpx.AsyncClient, caminho: str, params: dict[str, Any] | None = None
 ) -> httpx.Response:
-    for tentativa in range(MAX_TENTATIVAS_429):
-        await asyncio.sleep(INTERVALO_ENTRE_REQUISICOES)
-        try:
-            resposta = await client.get(caminho, params=params)
-        except httpx.HTTPError as erro:
-            raise UpstreamError(f"Falha ao consultar o Scryfall: {erro}") from erro
-        if resposta.status_code != httpx.codes.TOO_MANY_REQUESTS:
-            return resposta
-        # Retry-After com teto: o Scryfall as vezes manda dezenas de segundos, e
-        # nenhuma consulta daqui justifica esperar tanto.
-        espera = min(float(resposta.headers.get("Retry-After", 1 + tentativa)), ESPERA_MAXIMA_429)
-        await asyncio.sleep(espera)
-    return resposta
+    """GET no Scryfall. Falha de rede vira UpstreamError; 429 teimoso volta como
+    resposta, pro chamador tratar pelo status."""
+    try:
+        return await rede.com_retentativa_no_429(lambda: client.get(caminho, params=params))
+    except httpx.HTTPError as erro:
+        raise UpstreamError(f"Falha ao consultar o Scryfall: {erro}") from erro
 
 
 async def _buscar(

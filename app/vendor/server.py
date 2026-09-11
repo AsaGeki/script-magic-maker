@@ -104,11 +104,6 @@ class ServidorCardConjurer:
     def url(self) -> str:
         return f"http://127.0.0.1:{self.porta}"
 
-    @property
-    def url_do_criador(self) -> str:
-        """A página que a automação abre."""
-        return f"{self.url}/creator/"
-
     def start(self) -> "ServidorCardConjurer":
         garantir_instalado(self.diretorio)
         faltando = patches.pendentes(self.diretorio)

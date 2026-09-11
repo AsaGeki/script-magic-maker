@@ -114,6 +114,21 @@ def copias_da_lista(pasta: Path) -> tuple[dict[tuple[str, str], int], dict[str, 
     return por_impressao, por_nome
 
 
+def pastas_com_png(raiz: Path, *, excluir: Path | None = None) -> list[Path]:
+    """Toda pasta abaixo da raiz que tenha png, em qualquer profundidade.
+
+    Profundidade livre porque cada fluxo de deck monta a propria subpasta
+    (import de arquivo cai em decks/<nome>, estrutural em
+    decks/decks-estruturais/<nome>). `excluir` tira a pasta de cartas avulsas
+    de quem so quer deck.
+    """
+    return [
+        pasta
+        for pasta in sorted(raiz.rglob("*"))
+        if pasta.is_dir() and pasta != excluir and any(pasta.glob("*.png"))
+    ]
+
+
 def tem_metadata(pasta: Path) -> bool:
     """Se a pasta se declara um deck. E o metadata.txt que diz quantas copias
     de cada carta imprimir, entao pasta sem ele nao e deck pro fluxo de PDF."""

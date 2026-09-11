@@ -60,6 +60,7 @@ from app.deck.texto import (
 from app.errors import AppError, BadRequestError, NotFoundError
 from app.maker.service import (
     MOLDURAS,
+    NOME_DA_MOLDURA,
     PASTA_CARTAS_AVULSAS,
     fill_card,
     moldura_sugerida,
@@ -74,6 +75,7 @@ from app.print.service import (
     impressao_do_arquivo,
     ler_copias,
     montar_lote,
+    pastas_com_png,
     repetir_por_copias,
     tem_metadata,
 )
@@ -247,9 +249,6 @@ async def _gerar_com_retentativa(
         else:
             return destino, browser
     return None, browser
-
-
-NOME_DA_MOLDURA = {valor: nome for nome, valor in MOLDURAS.items()}
 
 
 async def _confirmar_moldura(carta: ScryfallCard) -> str | None:
@@ -769,16 +768,8 @@ FLUXOS_DECKS = {
 
 
 def _pastas_com_carta() -> list[Path]:
-    """Toda pasta com png que nao seja a de cartas avulsas (PASTA_CARTAS_AVULSAS).
-    Pega qualquer profundidade porque cada fluxo de deck monta a propria (import
-    de arquivo cai direto em DECKS_DIR/<nome>, estrutural em
-    DECKS_DIR/decks-estruturais/<nome>)."""
-    raiz = Path(OUTPUT_DIR)
-    return [
-        p
-        for p in sorted(raiz.rglob("*"))
-        if p.is_dir() and p != PASTA_CARTAS_AVULSAS and any(p.glob("*.png"))
-    ]
+    """As pastas de deck: tudo que tem png, menos a de cartas avulsas."""
+    return pastas_com_png(Path(OUTPUT_DIR), excluir=PASTA_CARTAS_AVULSAS)
 
 
 def _pastas_de_deck() -> list[Path]:

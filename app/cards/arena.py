@@ -13,13 +13,13 @@ import asyncio
 import json
 import logging
 import re
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
 
-from app.config import ARENA_CACHE_DIR, ARENA_CACHE_MAX_DIAS, SCRYFALL_USER_AGENT
+from app import rede
+from app.config import ARENA_CACHE_DIR, ARENA_CACHE_MAX_DIAS
 
 logger = logging.getLogger(__name__)
 
@@ -57,16 +57,9 @@ def _caminho(idioma: str) -> Path:
     return ARENA_CACHE_DIR / f"{idioma}-database.json"
 
 
-def _desatualizado(caminho: Path) -> bool:
-    if not caminho.is_file():
-        return True
-    idade_dias = (time.time() - caminho.stat().st_mtime) / 86400
-    return idade_dias > ARENA_CACHE_MAX_DIAS
-
-
 async def _garantir_baixado(client: httpx.AsyncClient, idioma: str) -> Path:
     caminho = _caminho(idioma)
-    if not _desatualizado(caminho):
+    if not rede.cache_vencido(caminho, ARENA_CACHE_MAX_DIAS):
         return caminho
 
     resposta = await client.get(URL_BANCO.format(idioma=idioma), follow_redirects=True)
@@ -88,9 +81,7 @@ async def _carregar(idioma: str) -> dict:
     async with _trava:
         if idioma in _bancos:
             return _bancos[idioma]
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT, headers={"User-Agent": SCRYFALL_USER_AGENT}
-        ) as client:
+        async with httpx.AsyncClient(timeout=TIMEOUT, headers=rede.CABECALHOS_DE_ARQUIVO) as client:
             caminho = await _garantir_baixado(client, idioma)
         _bancos[idioma] = json.loads(caminho.read_text(encoding="utf-8"))
     return _bancos[idioma]

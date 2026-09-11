@@ -7,29 +7,20 @@ formato batem - tamanho, limite de copias e, no Commander, deck singleton com
 comandante.
 """
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 
 import httpx
 
+from app import rede
 from app.cards.models import ScryfallCard
-from app.config import SCRYFALL_USER_AGENT
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.scryfall.com"
-TIMEOUT = 30.0
-CABECALHOS = {"User-Agent": SCRYFALL_USER_AGENT, "Accept": "application/json"}
-
-# O Scryfall pede ~100ms entre requisicoes, igual app.cards.service.
-INTERVALO_ENTRE_REQUISICOES = 0.1
 
 # Teto de identificadores por chamada em /cards/collection, definido pela API.
 IDENTIFICADORES_POR_CHAMADA = 75
-
-MAX_TENTATIVAS_429 = 3
-ESPERA_MAXIMA_429 = 2.0
 
 # Os formatos de papel, entre os 23 que o Scryfall devolve em `legalities`.
 FORMATOS = ("standard", "pioneer", "modern", "legacy", "vintage", "pauper", "commander")
@@ -97,7 +88,9 @@ async def consultar_legalidades(cartas: list[ScryfallCard]) -> dict[str, dict[st
     ids = list({carta.id for carta in cartas})
     legalidades: dict[str, dict[str, str]] = {}
 
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=TIMEOUT, headers=CABECALHOS) as cliente:
+    async with httpx.AsyncClient(
+        base_url=BASE_URL, timeout=rede.TIMEOUT_PADRAO, headers=rede.CABECALHOS_DE_API
+    ) as cliente:
         for inicio in range(0, len(ids), IDENTIFICADORES_POR_CHAMADA):
             lote = ids[inicio : inicio + IDENTIFICADORES_POR_CHAMADA]
             corpo = {"identifiers": [{"id": identificador} for identificador in lote]}
@@ -114,21 +107,16 @@ async def consultar_legalidades(cartas: list[ScryfallCard]) -> dict[str, dict[st
 async def _postar_com_retentativa(cliente: httpx.AsyncClient, corpo: dict) -> httpx.Response | None:
     """POST em /cards/collection reespera no 429. Devolve None quando desiste -
     quem chama trata as cartas do lote como nao consultadas."""
-    for tentativa in range(MAX_TENTATIVAS_429):
-        await asyncio.sleep(INTERVALO_ENTRE_REQUISICOES)
-        try:
-            resposta = await cliente.post("/cards/collection", json=corpo)
-        except httpx.HTTPError as erro:
-            logger.warning("legalidade indisponivel: %s", erro)
-            return None
-        if resposta.status_code == httpx.codes.OK:
-            return resposta
-        if resposta.status_code != httpx.codes.TOO_MANY_REQUESTS:
-            logger.warning("legalidade indisponivel: Scryfall respondeu %s", resposta.status_code)
-            return None
-        espera = min(float(resposta.headers.get("Retry-After", 1 + tentativa)), ESPERA_MAXIMA_429)
-        await asyncio.sleep(espera)
-    logger.warning("legalidade indisponivel: Scryfall segue limitando as requisicoes")
+    try:
+        resposta = await rede.com_retentativa_no_429(
+            lambda: cliente.post("/cards/collection", json=corpo)
+        )
+    except httpx.HTTPError as erro:
+        logger.warning("legalidade indisponivel: %s", erro)
+        return None
+    if resposta.status_code == httpx.codes.OK:
+        return resposta
+    logger.warning("legalidade indisponivel: Scryfall respondeu %s", resposta.status_code)
     return None
 
 

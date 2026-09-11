@@ -23,17 +23,16 @@ import logging
 import re
 import shutil
 import sqlite3
-import time
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from app import rede
 from app.cards.models import ScryfallCard
 from app.config import (
     MTGJSON_CACHE_DIR,
     MTGJSON_CACHE_MAX_DIAS,
-    SCRYFALL_USER_AGENT,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,13 +93,6 @@ def _caminho_do_banco() -> Path:
     return MTGJSON_CACHE_DIR / "AllPrintings.sqlite"
 
 
-def _desatualizado(caminho: Path) -> bool:
-    if not caminho.is_file():
-        return True
-    idade_dias = (time.time() - caminho.stat().st_mtime) / 86400
-    return idade_dias > MTGJSON_CACHE_MAX_DIAS
-
-
 async def _baixar(caminho: Path) -> None:
     """Baixa o .gz e descompacta no lugar, tudo em arquivo temporario.
 
@@ -114,7 +106,7 @@ async def _baixar(caminho: Path) -> None:
     logger.warning("Baixando o banco do MTGJSON (230 MB, so na primeira vez): %s", URL_BANCO)
     async with (
         httpx.AsyncClient(
-            timeout=TIMEOUT, follow_redirects=True, headers={"User-Agent": SCRYFALL_USER_AGENT}
+            timeout=TIMEOUT, follow_redirects=True, headers=rede.CABECALHOS_DE_ARQUIVO
         ) as client,
         client.stream("GET", URL_BANCO) as resposta,
     ):
@@ -151,7 +143,7 @@ async def _banco() -> sqlite3.Connection | None:
             return _conexao
         caminho = _caminho_do_banco()
         try:
-            if _desatualizado(caminho):
+            if rede.cache_vencido(caminho, MTGJSON_CACHE_MAX_DIAS):
                 await _baixar(caminho)
             _conexao = sqlite3.connect(caminho, check_same_thread=False)
             _conexao.row_factory = sqlite3.Row

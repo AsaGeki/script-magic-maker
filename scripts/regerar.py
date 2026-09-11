@@ -28,20 +28,18 @@ from app.cards.service import (
 )
 from app.config import HEADLESS, OUTPUT_DIR
 from app.maker.service import fill_card, moldura_sugerida
-from app.print.service import impressao_do_arquivo
+from app.print.service import impressao_do_arquivo, pastas_com_png
 from app.vendor.server import ServidorCardConjurer
 
 RAIZ = Path(OUTPUT_DIR)
 
 
-def _e_ficha(carta: ScryfallCard) -> bool:
-    return (carta.type_line or "").strip().lower().startswith(("token", "emblem"))
-
-
 def _pastas(argumentos: list[str]) -> list[Path]:
+    """As pastas que o argumento pediu, ou toda pasta com png - inclusive a de
+    cartas avulsas, que o regerar tambem atende."""
     if argumentos:
         return [RAIZ / alvo for alvo in argumentos]
-    return [p for p in sorted(RAIZ.rglob("*")) if p.is_dir() and any(p.glob("*.png"))]
+    return pastas_com_png(RAIZ)
 
 
 async def _cartas_da_pasta(pasta: Path) -> list[tuple[str, ScryfallCard]]:
@@ -60,14 +58,7 @@ async def _cartas_da_pasta(pasta: Path) -> list[tuple[str, ScryfallCard]]:
             continue
         resolvidas.append((arquivo, carta))
 
-    if not any(_e_ficha(carta) for _, carta in resolvidas):
-        return resolvidas
-
-    criadoras = [carta for _, carta in resolvidas if not _e_ficha(carta)]
-    enriquecidas = {}
-    for achada in await fichas.descobrir(criadoras):
-        ficha = achada.carta
-        enriquecidas[(ficha.set, ficha.collector_number)] = ficha
+    enriquecidas = await fichas.enriquecidas_por_impressao([c for _, c in resolvidas])
     return [
         (arquivo, enriquecidas.get((carta.set, carta.collector_number), carta))
         for arquivo, carta in resolvidas

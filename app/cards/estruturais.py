@@ -9,17 +9,13 @@ direto no mesmo pipeline de app.deck.service.
 import asyncio
 import json
 import logging
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
 
-from app.config import (
-    ESTRUTURAIS_CACHE_DIR,
-    ESTRUTURAIS_CACHE_MAX_DIAS,
-    SCRYFALL_USER_AGENT,
-)
+from app import rede
+from app.config import ESTRUTURAIS_CACHE_DIR, ESTRUTURAIS_CACHE_MAX_DIAS
 from app.deck.texto import COMMANDER, MAIN, SIDEBOARD, EntradaDeDeck
 from app.errors import UpstreamError
 
@@ -63,20 +59,13 @@ def _caminho_cache(nome_arquivo: str) -> Path:
     return ESTRUTURAIS_CACHE_DIR / nome_arquivo
 
 
-def _desatualizado(caminho: Path) -> bool:
-    if not caminho.is_file():
-        return True
-    idade_dias = (time.time() - caminho.stat().st_mtime) / 86400
-    return idade_dias > ESTRUTURAIS_CACHE_MAX_DIAS
-
-
 async def _buscar_json(
     client: httpx.AsyncClient, caminho_relativo: str, nome_arquivo_cache: str
 ) -> dict:
     """Le do cache em disco, baixando (ou reaproveitando) se preciso - mesmo
     esquema do cache do Arena (ver app.cards.arena)."""
     caminho = _caminho_cache(nome_arquivo_cache)
-    if _desatualizado(caminho):
+    if rede.cache_vencido(caminho, ESTRUTURAIS_CACHE_MAX_DIAS):
         resposta = await client.get(f"{BASE_URL}/{caminho_relativo}")
         resposta.raise_for_status()
         caminho.parent.mkdir(parents=True, exist_ok=True)
@@ -97,7 +86,7 @@ async def _carregar_indice() -> list[DeckEstrutural]:
             return _indice
         try:
             async with httpx.AsyncClient(
-                timeout=TIMEOUT, headers={"User-Agent": SCRYFALL_USER_AGENT}
+                timeout=TIMEOUT, headers=rede.CABECALHOS_DE_ARQUIVO
             ) as client:
                 bruto = await _buscar_json(client, "DeckList.json", "DeckList.json")
         except (httpx.HTTPError, OSError) as erro:
@@ -134,9 +123,7 @@ async def buscar_entradas_do_deck(arquivo: str) -> list[EntradaDeDeck]:
     usa - dai pra frente e o pipeline de sempre
     (app.deck.service.buscar_cartas_do_deck), que ja sabe resolver por
     edicao+numero com fallback pro nome."""
-    async with httpx.AsyncClient(
-        timeout=TIMEOUT, headers={"User-Agent": SCRYFALL_USER_AGENT}
-    ) as client:
+    async with httpx.AsyncClient(timeout=TIMEOUT, headers=rede.CABECALHOS_DE_ARQUIVO) as client:
         bruto = await _buscar_json(client, f"decks/{arquivo}.json", f"deck-{arquivo}.json")
     deck = bruto.get("data", {})
 

@@ -92,6 +92,7 @@ como autor ou coautor.
 | `patches/cardconjurer/*.patch` | Correção de defeito do gerador. Numerado, com a marca `script-magic-maker: <nome>` no código alterado |
 | `app/maker/browser/*.js` | Ajuste que **depende de dado da carta** (aplicar saga, moldura, nome traduzido) |
 | `vendor/` | Clone do Card Conjurer, ~5 GB, fora do controle de versão. Edição direta aqui **não sobrevive** ao próximo clone |
+| `app/rede.py` | O que todo módulo que fala com serviço de fora compartilha: cabeçalho, ritmo entre requisições, retentativa no 429 e validade de cache baixado. A **política de erro não mora lá** — cada chamador decide se a falha vira exceção ou log |
 | `output/` | Imagem gerada. Nunca versionado |
 | `PENDENCIAS.md` | O que ainda diverge da carta impressa, com o dado já medido sobre cada caso |
 | `DECK.md` | Formato da lista de deck |

@@ -26,8 +26,8 @@ from math import log
 import httpx
 from PIL import Image, ImageChops, UnidentifiedImageError
 
+from app import rede
 from app.cards.models import ScryfallCard
-from app.config import SCRYFALL_USER_AGENT
 from app.slug import slug
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,6 @@ BASE_MTGPICS = "https://www.mtgpics.com"
 BASE_SCRYFALL = "https://api.scryfall.com"
 
 TIMEOUT = 25.0
-CABECALHOS = {"User-Agent": SCRYFALL_USER_AGENT}
 
 # Cada miniatura vem colada no id da ilustracao, que e por onde se chega ao
 # ilustrador.
@@ -68,7 +67,7 @@ async def buscar(
     arte cortada.
     """
     async with httpx.AsyncClient(
-        timeout=TIMEOUT, follow_redirects=True, headers=CABECALHOS
+        timeout=TIMEOUT, follow_redirects=True, headers=rede.CABECALHOS_DE_ARQUIVO
     ) as client:
         referencia = await _art_crop_em_ingles(client, carta)
         if referencia is None:
@@ -154,7 +153,7 @@ async def dividida(carta: ScryfallCard) -> str | None:
     lado e deitadas - nem o MTGPics nem as faces do Scryfall trazem separadas.
     """
     async with httpx.AsyncClient(
-        timeout=TIMEOUT, follow_redirects=True, headers=CABECALHOS
+        timeout=TIMEOUT, follow_redirects=True, headers=rede.CABECALHOS_DE_ARQUIVO
     ) as client:
         recorte = await _art_crop_em_ingles(client, carta)
     if recorte is None:

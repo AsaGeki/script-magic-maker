@@ -123,14 +123,3 @@ class ScryfallCard(FaceBase):
     def faces(self) -> list[FaceBase]:
         """As faces a gerar. Carta de uma face só devolve ela mesma."""
         return list(self.card_faces) if self.card_faces else [self]
-
-    @property
-    def arte_mtgpics(self) -> str:
-        """Arte no MTGPics, a fonte primária.
-
-        O número de colecionador nem sempre é numérico (promo e variante têm
-        sufixo); aí a URL sai com o valor cru e quem baixa trata o 404.
-        """
-        numero = self.collector_number
-        url = f"https://www.mtgpics.com/pics/art/{self.set}/"
-        return f"{url}{int(numero):03d}.jpg" if numero.isdigit() else f"{url}{numero}.jpg"

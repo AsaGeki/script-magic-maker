@@ -19,19 +19,14 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from app import rede
 from app.cards.arena import TraducaoArena
 from app.cards.models import ScryfallCard
 from app.cards.service import _buscar, find_card_by_id
-from app.config import SCRYFALL_USER_AGENT
 
 logger = logging.getLogger(__name__)
 
 BASE_SCRYFALL = "https://api.scryfall.com"
-TIMEOUT = 30.0
-CABECALHOS = {"User-Agent": SCRYFALL_USER_AGENT, "Accept": "application/json"}
-
-# O Scryfall pede ~100ms entre requisicoes, igual app.cards.service.
-INTERVALO_ENTRE_REQUISICOES = 0.1
 
 _LEMBRETE = re.compile(r"\(([^()]*)\)")
 _ENTRE_ASPAS = re.compile(r"[\"“”]([^\"“”]+)[\"“”]")
@@ -48,6 +43,34 @@ _SUBTIPO_PT = re.compile(r"\bfichas?\s+de\s+([A-ZÀ-Ú][\wÀ-ÿ'/-]*(?:\s+[A-ZÀ
 # e como o portugues ja faz com supertipo ("Criatura Lendaria"). Nao ha ficha em
 # portugues em fonte nenhuma pra confirmar.
 MARCA_DE_FICHA = "ficha"
+
+
+def e_ficha(carta: ScryfallCard) -> bool:
+    """Se a carta e ficha ou emblema, e nao carta de baralho.
+
+    Vale a linha de tipo e nao o layout: emblema e ficha de duas faces tem
+    layout proprio, mas o que separa todos eles de uma carta comum e comecar
+    por "Token" ou "Emblem".
+    """
+    return (carta.type_line or "").strip().lower().startswith(("token", "emblem"))
+
+
+async def enriquecidas_por_impressao(
+    cartas: list[ScryfallCard],
+) -> dict[tuple[str, str], ScryfallCard]:
+    """As fichas do deck com o portugues ja preenchido, por (edicao, numero).
+
+    Quem gera em lote comeca com a ficha crua, em ingles, e precisa trocar
+    pela versao que o `descobrir` monta - e ele precisa das cartas que CRIAM
+    a ficha, nao das fichas. Sem ficha na lista, nada a fazer.
+    """
+    if not any(e_ficha(carta) for carta in cartas):
+        return {}
+    criadoras = [carta for carta in cartas if not e_ficha(carta)]
+    return {
+        (achada.carta.set, achada.carta.collector_number): achada.carta
+        for achada in await descobrir(criadoras)
+    }
 
 
 @dataclass
@@ -69,7 +92,7 @@ async def descobrir(cartas: list[ScryfallCard]) -> list[FichaDoDeck]:
     # Com base_url: as buscas de regra reusam o _buscar do app.cards.service,
     # que monta o caminho relativo.
     async with httpx.AsyncClient(
-        base_url=BASE_SCRYFALL, timeout=TIMEOUT, headers=CABECALHOS
+        base_url=BASE_SCRYFALL, timeout=rede.TIMEOUT_PADRAO, headers=rede.CABECALHOS_DE_API
     ) as client:
         for carta in cartas:
             for parte in await _partes_de_ficha(client, carta):
@@ -86,7 +109,7 @@ async def descobrir(cartas: list[ScryfallCard]) -> list[FichaDoDeck]:
 
 async def _partes_de_ficha(client: httpx.AsyncClient, carta: ScryfallCard) -> list[dict]:
     """As entradas de ficha do all_parts, lidas da impressao em ingles."""
-    await asyncio.sleep(INTERVALO_ENTRE_REQUISICOES)
+    await asyncio.sleep(rede.INTERVALO_ENTRE_REQUISICOES)
     try:
         resposta = await client.get(
             f"{BASE_SCRYFALL}/cards/{carta.set}/{carta.collector_number}/en"
@@ -172,7 +195,7 @@ async def _metade_traduzida(
     Comparar a metade inteira evita casar "Artifact" com "Artifact Creature".
     """
     consulta = " ".join(f't:"{palavra}"' for palavra in em_ingles.split())
-    await asyncio.sleep(INTERVALO_ENTRE_REQUISICOES)
+    await asyncio.sleep(rede.INTERVALO_ENTRE_REQUISICOES)
     try:
         resposta = await client.get(
             f"{BASE_SCRYFALL}/cards/search",

@@ -11,7 +11,7 @@ import logging
 
 import httpx
 
-from app.config import SCRYFALL_USER_AGENT
+from app import rede
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +42,7 @@ async def palavras_de_habilidade() -> tuple[str, ...]:
 
 async def _buscar() -> tuple[str, ...]:
     try:
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT, headers={"User-Agent": SCRYFALL_USER_AGENT}
-        ) as client:
+        async with httpx.AsyncClient(timeout=TIMEOUT, headers=rede.CABECALHOS_DE_API) as client:
             resposta = await client.get(URL_DAS_PALAVRAS)
         resposta.raise_for_status()
         dados = resposta.json()
