@@ -1,0 +1,120 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -927,6 +927,10 @@
+ 	} else if (frame == 'M15Mutate') {
+ 		group = 'Standard-3';
+ 		autoM15MutateFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '');
++	/* script-magic-maker: moldura-de-nivel */
++	} else if (frame == 'Levelers') {
++		group = 'Standard-3';
++		autoLevelersFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '');
+ 	}
+ 
+ 	if (autoFramePack != frame) {
+@@ -1248,6 +1252,93 @@
+ 
+ 	card.frames = frames;
+ 	card.frames.reverse();
++	await card.frames.forEach(item => addFrame([], item));
++	card.frames.reverse();
++}
++/* script-magic-maker: moldura-de-nivel */
++// packLevelers.js so e alcancavel pelo seletor manual de pacote. A carta de
++// nivel reparte a caixa de regras em tres faixas, com a aba do nivel a esquerda
++// e o poder/resistencia de cada faixa a direita. As bounds e os campos de texto
++// aqui sao os do pacote.
++//
++// O pacote recorta a coluna de poder/resistencia em tres mascaras pra quem
++// quiser cor diferente por faixa; as tres somadas cobrem a imagem inteira,
++// entao aqui ela entra em uma camada so.
++var MASCARAS_DO_NIVEL = {
++	'Pinline': '/img/frames/levelers/regular/pinline.svg',
++	'Title': '/img/frames/m15/regular/m15MaskTitle.png',
++	'Type': '/img/frames/m15/regular/m15MaskType.png',
++	'Rules': '/img/frames/levelers/regular/text.svg',
++	'Level (Middle)': '/img/frames/levelers/regular/levelMid.svg',
++	'Level (Bottom)': '/img/frames/levelers/regular/levelBottom.svg',
++	'Frame': '/img/frames/levelers/regular/frame.svg',
++	'Border': '/img/frames/m15/regular/m15MaskBorder.png'
++};
++function makeLevelersFrameByLetter(letter, mask) {
++	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'A': 'Artifact', 'V': 'Vehicle'};
++	letter = letter.toUpperCase();
++	if (mask == 'PT') {
++		return {
++			name: frameNames[letter] + ' Power/Toughness',
++			src: '/img/frames/levelers/regular/pt/' + letter.toLowerCase() + '.png',
++			masks: [],
++			bounds: {x: 0.7574, y: 0.6415, width: 0.188, height: 0.2667}
++		};
++	}
++	return {
++		name: frameNames[letter] + ' ' + mask,
++		src: '/img/frames/levelers/regular/' + letter.toLowerCase() + '.png',
++		masks: [{src: MASCARAS_DO_NIVEL[mask], name: mask}]
++	};
++}
++async function autoLevelersFrame(colors, mana_cost, type_line, power) {
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	// resetOthers desligado pra nao refazer o rodape: quem escolhe o estilo dele
++	// e quem chamou, antes desta moldura.
++	await resetCardIrregularities({resetOthers: false});
++	card.version = 'levelers';
++	card.artBounds = {x: 0.0767, y: 0.1129, width: 0.8476, height: 0.4429};
++	autoFitArt();
++	card.setSymbolBounds = {x: 0.9213, y: 0.5910, width: 0.12, height: 0.0410, vertical: 'center', horizontal: 'right'};
++	resetSetSymbol();
++	card.watermarkBounds = {x: 0.5, y: 0.7762, width: 0.75, height: 0.2305};
++	resetWatermark();
++	loadTextOptions({
++		mana: {name: 'Mana Cost', text: '', y: 0.0613, width: 0.9292, height: 71/2100, oneLine: true, size: 71/1638, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0},
++		title: {name: 'Title', text: '', x: 0.0854, y: 0.0522, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0381},
++		type: {name: 'Type', text: '', x: 0.0854, y: 0.5664, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0324},
++		rules: {name: 'Rules Text 1', text: '', x: 0.086, y: 0.6303, width: 0.6834, height: 0.0905, size: 0.0296},
++		rules2: {name: 'Rules Text 2', text: '', x: 0.2067, y: 0.7229, width: 0.5627, height: 0.0953, size: 0.0296},
++		rules3: {name: 'Rules Text 3', text: '', x: 0.2067, y: 0.8220, width: 0.5627, height: 0.0953, size: 0.0296},
++		pt: {name: 'Power/Toughness 1', text: '', x: 0.7928, y: 0.6591, width: 0.1367, height: 0.0372, size: 0.0372, font: 'belerenbsc', oneLine: true, align: 'center'},
++		pt2: {name: 'Power/Toughness 2', text: '', x: 0.7928, y: 0.7524, width: 0.1367, height: 0.0372, size: 0.0372, font: 'belerenbsc', oneLine: true, align: 'center'},
++		pt3: {name: 'Power/Toughness 3', text: '', x: 0.7928, y: 0.8515, width: 0.1367, height: 0.0372, size: 0.0372, font: 'belerenbsc', oneLine: true, align: 'center'},
++		level2: {name: 'Level 2', text: '', x: 0.0727, y: 0.7420, width: 0.08, height: 0.0572, size: 0.0139, font: 'belerenbsc', align: 'center'},
++		level3: {name: 'Level 3', text: '', x: 0.0727, y: 0.8448, width: 0.08, height: 0.0572, size: 0.0139, font: 'belerenbsc', align: 'center'}
++	});
++
++	var properties = cardFrameProperties(colors, mana_cost, type_line, power);
++	var frames = [];
++	if (type_line.includes('Legendary')) {
++		frames.push(makeM15FrameByLetter(properties.pinline, 'Crown', false));
++		frames.push(makeM15FrameByLetter(properties.pinline, 'Crown Border Cover', false));
++	}
++	if (properties.pt) {
++		frames.push(makeLevelersFrameByLetter(properties.pt, 'PT'));
++	}
++	frames.push(makeLevelersFrameByLetter(properties.pinline, 'Pinline'));
++	frames.push(makeLevelersFrameByLetter(properties.typeTitle, 'Type'));
++	frames.push(makeLevelersFrameByLetter(properties.typeTitle, 'Title'));
++	frames.push(makeLevelersFrameByLetter(properties.rules, 'Rules'));
++	frames.push(makeLevelersFrameByLetter(properties.frame, 'Level (Middle)'));
++	frames.push(makeLevelersFrameByLetter(properties.frame, 'Level (Bottom)'));
++	frames.push(makeLevelersFrameByLetter(properties.frame, 'Frame'));
++	frames.push(makeLevelersFrameByLetter(properties.frame, 'Border'));
++
++	card.frames = frames;
++	card.frames.reverse();
+ 	await card.frames.forEach(item => addFrame([], item));
+ 	card.frames.reverse();
+ }
+diff --git a/creator/index.html b/creator/index.html
+--- a/creator/index.html
++++ b/creator/index.html
+@@ -745,6 +745,8 @@
+ 							<option value="TokenRegular-1">Token</option>
+ 							<!-- script-magic-maker: moldura-de-mutacao -->
+ 							<option value="M15Mutate">Mutate</option>
++							<!-- script-magic-maker: moldura-de-nivel -->
++							<option value="Levelers">Leveler</option>
+ 							<option value="UBNew">Universes Beyond (Accurate)</option>
+ 
+ 							<option disabled>Custom frames</option>

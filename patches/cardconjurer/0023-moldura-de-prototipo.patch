@@ -1,0 +1,131 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -931,6 +931,10 @@
+ 	} else if (frame == 'Levelers') {
+ 		group = 'Standard-3';
+ 		autoLevelersFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '');
++	/* script-magic-maker: moldura-de-prototipo */
++	} else if (frame == 'Prototype') {
++		group = 'Standard-3';
++		autoPrototypeFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '');
+ 	}
+ 
+ 	if (autoFramePack != frame) {
+@@ -1255,6 +1259,92 @@
+ 	await card.frames.forEach(item => addFrame([], item));
+ 	card.frames.reverse();
+ }
++/* script-magic-maker: moldura-de-prototipo */
++// packPrototype.js so e alcancavel pelo seletor manual de pacote. A carta de
++// prototipo e a de artefato com uma faixa colorida por cima do topo da caixa de
++// regras, onde vao o custo alternativo, o lembrete e o poder/resistencia
++// menores. As bounds e os campos de texto aqui sao os do pacote.
++//
++// A cor da faixa e o tamanho do quadro do custo saem do proprio custo
++// alternativo, que vem no texto depois da marca de secao do Scryfall.
++var PASTA_DO_PROTOTIPO = '/img/frames/m15/prototype/regular/';
++var ARQUIVO_DO_PROTOTIPO = {
++	'Rules': 'rules',
++	'Mana Cost (Short)': 'manaCost',
++	'Mana Cost (Long)': 'manaCostLong',
++	'P/T': 'pt'
++};
++function linhasDoPrototipo() {
++	var partes = (card.textoComSecoes || '').split(/^\/\/[^\/\n]+\/\/\r?\n?/m);
++	if (partes.length < 2) {
++		return [];
++	}
++	return partes[1].split('\n').filter(function(linha) { return linha.trim(); });
++}
++function makePrototypeFrameByLetter(letter, parte) {
++	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolor'};
++	var frame = {
++		name: frameNames[letter] + ' Prototype ' + parte,
++		src: PASTA_DO_PROTOTIPO + ARQUIVO_DO_PROTOTIPO[parte] + letter + '.png',
++		masks: []
++	};
++	if (parte == 'Rules') {
++		frame.masks.push({src: PASTA_DO_PROTOTIPO + 'maskPinline.png', name: 'Pinline'});
++	}
++	return frame;
++}
++async function autoPrototypeFrame(colors, mana_cost, type_line, power) {
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	// resetOthers desligado pra nao refazer o rodape: quem escolhe o estilo dele
++	// e quem chamou, antes desta moldura.
++	await resetCardIrregularities({resetOthers: false});
++	card.version = 'prototype';
++	card.artBounds = {x: 0.0767, y: 0.1129, width: 0.8476, height: 0.4429};
++	autoFitArt();
++	card.setSymbolBounds = {x: 0.9213, y: 0.5910, width: 0.12, height: 0.0410, vertical: 'center', horizontal: 'right'};
++	resetSetSymbol();
++	card.watermarkBounds = {x: 0.72, y: 0.7681, width: 0.3867, height: 0.2358};
++	resetWatermark();
++	loadTextOptions({
++		mana: {name: 'Mana Cost', text: '', y: 0.0613, width: 0.9292, height: 71/2100, oneLine: true, size: 71/1638, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0},
++		title: {name: 'Title', text: '', x: 0.0854, y: 0.0522, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0381},
++		type: {name: 'Type', text: '', x: 0.0854, y: 0.5664, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0324},
++		rules: {name: 'Rules Text', text: '', x: 129/1500, y: 1565/2100, width: 1242/1500, height: 359/2100, size: 0.0295},
++		pt: {name: 'Power/Toughness', text: '', x: 0.7928, y: 0.902, width: 0.1367, height: 0.0372, size: 0.0372, font: 'belerenbsc', oneLine: true, align: 'center'},
++		mana2: {name: 'Prototype Mana Cost', text: '', x: -24/1500, y: 1340/2100, width: 0.9292, height: 71/2100, oneLine: true, size: 72/2100, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0},
++		rules2: {name: 'Prototype Rules', text: '', x: 129/1500, y: 1335/2100, width: 1041/1500, height: 193/2100, size: 0.0295},
++		pt2: {name: 'Prototype P/T', text: '', x: 0.7928, y: 0.6935, width: 0.1367, height: 0.0372, size: 0.0372, color: 'white', font: 'belerenbsc', oneLine: true, align: 'center'}
++	});
++
++	var custo = linhasDoPrototipo()[0] || '';
++	var coresDoPrototipo = [...new Set(custo.toUpperCase().split('').filter(function(char) { return ['W', 'U', 'B', 'R', 'G'].includes(char); }))];
++	var corDoPrototipo = coresDoPrototipo.length == 1 ? coresDoPrototipo[0] : 'M';
++	// O quadro curto cabe dois simbolos; a partir do terceiro so o largo.
++	var simbolos = (custo.match(/\{[^}]+\}/g) || []).length;
++	var quadroDoCusto = simbolos > 2 ? 'Mana Cost (Long)' : 'Mana Cost (Short)';
++
++	var properties = cardFrameProperties(colors, mana_cost, type_line, power);
++	var frames = [];
++	frames.push(makePrototypeFrameByLetter(corDoPrototipo, 'P/T'));
++	frames.push(makePrototypeFrameByLetter(corDoPrototipo, quadroDoCusto));
++	frames.push(makePrototypeFrameByLetter(corDoPrototipo, 'Rules'));
++	if (properties.pt) {
++		frames.push(makeM15FrameByLetter(properties.pt, 'PT', false));
++	}
++	frames.push(makeM15FrameByLetter(properties.pinline, 'Pinline', false));
++	frames.push(makeM15FrameByLetter(properties.typeTitle, 'Type', false));
++	frames.push(makeM15FrameByLetter(properties.typeTitle, 'Title', false));
++	frames.push(makeM15FrameByLetter(properties.rules, 'Rules', false));
++	frames.push(makeM15FrameByLetter(properties.frame, 'Frame', false));
++	frames.push(makeM15FrameByLetter(properties.frame, 'Border', false));
++
++	card.frames = frames;
++	card.frames.reverse();
++	await card.frames.forEach(item => addFrame([], item));
++	card.frames.reverse();
++}
+ /* script-magic-maker: moldura-de-nivel */
+ // packLevelers.js so e alcancavel pelo seletor manual de pacote. A carta de
+ // nivel reparte a caixa de regras em tres faixas, com a aba do nivel a esquerda
+@@ -5834,6 +5924,11 @@
+ 	// cruas na caixa de regras.
+ 	var textoComSecoes = rulesText;
+ 	rulesText = semMarcadorDeSecao(rulesText);
++	/* script-magic-maker: texto-com-marca-de-secao-guardado */
++	// A moldura de prototipo tambem corta o texto pela marca, mas ela so e
++	// montada depois do import: guardar o texto marcado deixa o corte pra quem
++	// vier depois.
++	card.textoComSecoes = textoComSecoes;
+ 
+ 	if (card.text.rules) {
+ 		if (card.version == 'pokemon') {
+diff --git a/creator/index.html b/creator/index.html
+--- a/creator/index.html
++++ b/creator/index.html
+@@ -747,6 +747,8 @@
+ 							<option value="M15Mutate">Mutate</option>
+ 							<!-- script-magic-maker: moldura-de-nivel -->
+ 							<option value="Levelers">Leveler</option>
++							<!-- script-magic-maker: moldura-de-prototipo -->
++							<option value="Prototype">Prototype</option>
+ 							<option value="UBNew">Universes Beyond (Accurate)</option>
+ 
+ 							<option disabled>Custom frames</option>

@@ -1,0 +1,106 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -923,6 +923,10 @@
+ 	} else if (frame == 'TokenRegular-1') {
+ 		group = 'Token-2';
+ 		autoTokenRegularFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '');
++	/* script-magic-maker: moldura-de-mutacao */
++	} else if (frame == 'M15Mutate') {
++		group = 'Standard-3';
++		autoM15MutateFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '');
+ 	}
+ 
+ 	if (autoFramePack != frame) {
+@@ -1247,6 +1251,67 @@
+ 	await card.frames.forEach(item => addFrame([], item));
+ 	card.frames.reverse();
+ }
++/* script-magic-maker: moldura-de-mutacao */
++// packM15Mutate.js so e alcancavel pelo seletor manual de pacote. A moldura e a
++// M15 comum com uma segunda caixa de texto acima da de regras, onde vai a linha
++// da mutacao: mesmas mascaras, so a imagem de cada cor muda de pasta. As bounds
++// e os campos de texto aqui sao os do pacote.
++async function autoM15MutateFrame(colors, mana_cost, type_line, power) {
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	// resetOthers desligado pra nao refazer o rodape: quem escolhe o estilo dele
++	// e quem chamou, antes desta moldura.
++	await resetCardIrregularities({resetOthers: false});
++	card.version = 'm15Mutate';
++	card.artBounds = {x: 0.0614, y: 0.1129, width: 0.8774, height: 0.6434};
++	autoFitArt();
++	card.setSymbolBounds = {x: 0.9213, y: 0.5910, width: 0.12, height: 0.0410, vertical: 'center', horizontal: 'right'};
++	resetSetSymbol();
++	card.watermarkBounds = {x: 0.5, y: 0.7762, width: 0.75, height: 0.2305};
++	resetWatermark();
++	loadTextOptions({
++		mana: {name: 'Mana Cost', text: '', y: 0.0613, width: 0.9292, height: 71/2100, oneLine: true, size: 71/1638, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0},
++		title: {name: 'Title', text: '', x: 0.0854, y: 0.0522, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0381},
++		type: {name: 'Type', text: '', x: 0.0854, y: 0.5664, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0324},
++		mutate: {name: 'Mutate Cost', text: '', x: 0.086, y: 0.6303, width: 0.828, height: 0.1215, size: 0.0291},
++		rules: {name: 'Rules Text', text: '', x: 0.086, y: 0.7567, width: 0.828, height: 0.1615, size: 0.0291},
++		pt: {name: 'Power/Toughness', text: '', x: 0.7928, y: 0.902, width: 0.1367, height: 0.0372, size: 0.0372, font: 'belerenbsc', oneLine: true, align: 'center'}
++	});
++
++	var properties = cardFrameProperties(colors, mana_cost, type_line, power);
++	var frames = [];
++	if (type_line.includes('Legendary')) {
++		if (properties.pinlineRight) {
++			frames.push(makeM15FrameByLetter(properties.pinlineRight, 'Crown', true));
++		}
++		frames.push(makeM15FrameByLetter(properties.pinline, 'Crown', false));
++		frames.push(makeM15FrameByLetter(properties.pinline, 'Crown Border Cover', false));
++	}
++	if (properties.pt) {
++		frames.push(makeM15FrameByLetter(properties.pt, 'PT', false));
++	}
++	if (properties.pinlineRight) {
++		frames.push(makeM15FrameByLetter(properties.pinlineRight, 'Pinline', true, 'mutate'));
++	}
++	frames.push(makeM15FrameByLetter(properties.pinline, 'Pinline', false, 'mutate'));
++	frames.push(makeM15FrameByLetter(properties.typeTitle, 'Type', false, 'mutate'));
++	frames.push(makeM15FrameByLetter(properties.typeTitle, 'Title', false, 'mutate'));
++	if (properties.rulesRight) {
++		frames.push(makeM15FrameByLetter(properties.rulesRight, 'Rules', true, 'mutate'));
++	}
++	frames.push(makeM15FrameByLetter(properties.rules, 'Rules', false, 'mutate'));
++	if (properties.frameRight) {
++		frames.push(makeM15FrameByLetter(properties.frameRight, 'Frame', true, 'mutate'));
++	}
++	frames.push(makeM15FrameByLetter(properties.frame, 'Frame', false, 'mutate'));
++	frames.push(makeM15FrameByLetter(properties.frame, 'Border', false, 'mutate'));
++
++	card.frames = frames;
++	card.frames.reverse();
++	await card.frames.forEach(item => addFrame([], item));
++	card.frames.reverse();
++}
+ /* script-magic-maker: moldura-de-vanguarda */
+ // packVanguard.js so e alcancavel pelo seletor manual de pacote. A moldura e
+ // uma imagem so, sem cor: o que ela traz de proprio sao os campos do tamanho de
+@@ -2283,7 +2348,10 @@
+ 		'src': '/img/frames/m15/' + style.toLowerCase() + '/m15Frame' + letter + '.png',
+ 	}
+ 
+-	if (style == 'snow') {
++	/* script-magic-maker: moldura-de-mutacao */
++	// O arquivo da mutacao se chama "w.png", sem o prefixo "m15Frame" do resto
++	// do M15 - a mesma nomenclatura da neve.
++	if (style == 'snow' || style == 'mutate') {
+ 		frame.src = frame.src.replace('m15Frame' + letter, letter.toLowerCase());
+ 	} else {
+ 		if (letter.includes('L') && letter.length > 1) {
+diff --git a/creator/index.html b/creator/index.html
+--- a/creator/index.html
++++ b/creator/index.html
+@@ -743,6 +743,8 @@
+ 							<option value="Split">Split</option>
+ 							<!-- script-magic-maker: moldura-de-ficha -->
+ 							<option value="TokenRegular-1">Token</option>
++							<!-- script-magic-maker: moldura-de-mutacao -->
++							<option value="M15Mutate">Mutate</option>
+ 							<option value="UBNew">Universes Beyond (Accurate)</option>
+ 
+ 							<option disabled>Custom frames</option>

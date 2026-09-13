@@ -64,6 +64,9 @@ MOLDURAS = {
     "Virada": "Flip",
     "Dividida": "Split",
     "Ficha": "TokenRegular-1",
+    "Mutacao": "M15Mutate",
+    "Nivel": "Levelers",
+    "Prototipo": "Prototype",
     "Transformada (frente)": "M15TransformFront",
     "Transformada (verso)": "M15TransformBack",
     "Modal (frente)": "ModalRegular",
@@ -83,12 +86,27 @@ MOLDURA_DO_LAYOUT = {
     Layout.FLIP: "Virada",
     Layout.SPLIT: "Dividida",
     Layout.TOKEN: "Ficha",
+    Layout.MUTATE: "Mutacao",
+    Layout.LEVELER: "Nivel",
+    Layout.PROTOTYPE: "Prototipo",
 }
 MOLDURA_PADRAO = "M15Regular-1"
 
 # O set_type que a Wizards da as colecoes de piada (Unfinity, Unstable). So
 # elas imprimem o nome do terreno basico sem borda no topo.
 TIPO_DE_COLECAO_DE_PIADA = "funny"
+
+
+def _fora_do_alcance_da_moldura(carta: ScryfallCard) -> bool:
+    """Carta de layout com moldura propria que a moldura nao cobre.
+
+    O pacote de nivel so traz moldura colorida, de artefato e de veiculo; um
+    terreno com esse layout ficaria com a camada de moldura vazia. A unica
+    carta assim (`Under-Construction Skyscraper`, MB2) tambem sai da grafica na
+    moldura comum, com as faixas de nivel viradas texto: a M15 e mais perto da
+    impressa do que a de nivel seria.
+    """
+    return carta.layout == Layout.LEVELER and "land" in (carta.type_line or "").lower()
 
 
 def _moldura_de_terreno_basico(carta: ScryfallCard) -> str:
@@ -119,7 +137,7 @@ def moldura_sugerida(carta: ScryfallCard) -> str:  # noqa: PLR0911 - um return p
     # Antes de tudo: layout com moldura propria reparte a carta de um jeito que
     # nenhuma moldura de carta comum alcanca - faixa de capitulos na lateral,
     # arte de um lado e texto do outro.
-    if carta.layout in MOLDURA_DO_LAYOUT:
+    if carta.layout in MOLDURA_DO_LAYOUT and not _fora_do_alcance_da_moldura(carta):
         return MOLDURAS[MOLDURA_DO_LAYOUT[carta.layout]]
     if e_terreno_basico(carta) and carta.full_art:
         return _moldura_de_terreno_basico(carta)
@@ -700,6 +718,30 @@ async def _aplicar_classe(page: Page, carta: ScryfallCard) -> None:
     await _esperar_desenho(page)
 
 
+_APLICAR_MUTACAO = carregar("aplicar-mutacao")
+
+
+async def _aplicar_mutacao(page: Page, carta: ScryfallCard) -> None:
+    """Depois da moldura: a caixa do custo de mutacao so existe na moldura de
+    mutacao, e o import escreve todo o texto na caixa de regras."""
+    if carta.layout != Layout.MUTATE:
+        return
+    await page.evaluate(_APLICAR_MUTACAO)
+    await _esperar_desenho(page)
+
+
+_APLICAR_NIVEL = carregar("aplicar-nivel")
+
+
+async def _aplicar_nivel(page: Page, carta: ScryfallCard, moldura: str) -> None:
+    """Depois da moldura: as faixas de nivel so existem na moldura de nivel, e o
+    import escreve todo o texto na caixa de regras."""
+    if carta.layout != Layout.LEVELER or moldura != MOLDURAS["Nivel"]:
+        return
+    await page.evaluate(_APLICAR_NIVEL)
+    await _esperar_desenho(page)
+
+
 _APLICAR_DUAS_FACES = carregar("aplicar-duas-faces")
 
 
@@ -717,6 +759,18 @@ async def _aplicar_duas_faces(page: Page, carta: ScryfallCard, indice_da_face: i
             "custoDoOutroLado": outro.mana_cost or "",
         },
     )
+    await _esperar_desenho(page)
+
+
+_APLICAR_PROTOTIPO = carregar("aplicar-prototipo")
+
+
+async def _aplicar_prototipo(page: Page, carta: ScryfallCard) -> None:
+    """Depois da moldura: a faixa do prototipo so existe na moldura de
+    prototipo, e o import escreve todo o texto na caixa de regras."""
+    if carta.layout != Layout.PROTOTYPE:
+        return
+    await page.evaluate(_APLICAR_PROTOTIPO)
     await _esperar_desenho(page)
 
 
@@ -1092,6 +1146,9 @@ async def _preencher(
         await _aplicar_moldura(page, carta, face, moldura)
         await _aplicar_saga(page, carta)
         await _aplicar_classe(page, carta)
+        await _aplicar_mutacao(page, carta)
+        await _aplicar_nivel(page, carta, moldura)
+        await _aplicar_prototipo(page, carta)
         await _aplicar_duas_faces(page, carta, indice_da_face)
         await _aplicar_vanguarda(page, carta)
         await _aplicar_aventura(page, carta)
