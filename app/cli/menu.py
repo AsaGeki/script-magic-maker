@@ -136,10 +136,12 @@ async def _gerar_uma(
     pasta_destino: Path | None = None,
     moldura: str | None = None,
     preferir_arena: bool | None = None,
-) -> Path | None:
+) -> list[Path]:
     """No lote (`confirmar=False`), a selecao no checkbox ja e a confirmacao.
     `pasta_destino` None cai no padrao de fill_card (output/cards).
-    `preferir_arena` None deixa preferir_traducao_do_arena decidir por carta."""
+    `preferir_arena` None deixa preferir_traducao_do_arena decidir por carta.
+
+    Devolve um caminho por face, e a lista vazia quando o usuario nao confirma."""
     if preferir_arena is None:
         preferir_arena = preferir_traducao_do_arena(carta)
     if not carta.traduzida and not carta.printed_name:
@@ -156,17 +158,18 @@ async def _gerar_uma(
             f'Gerar "{carta.nome_exibido}"?', default=True
         ).ask_async()
     ):
-        return None
+        return []
     async with cronometrar(console, f'  Gerando "{carta.nome_exibido}"'):
-        destino = await fill_card(
+        destinos = await fill_card(
             carta,
             browser=browser,
             pasta_destino=pasta_destino,
             moldura=moldura,
             preferir_arena=preferir_arena,
         )
-    console.print(f"  [green]OK[/] salvo em [bold]{destino}[/]")
-    return destino
+    for destino in destinos:
+        console.print(f"  [green]OK[/] salvo em [bold]{destino}[/]")
+    return destinos
 
 
 async def _gerar_varias(
@@ -188,7 +191,7 @@ async def _gerar_varias(
             try:
                 for indice, carta in enumerate(cartas, start=1):
                     console.rule(f"{indice}/{len(cartas)}: {carta.nome_exibido}")
-                    destino, browser = await _gerar_com_retentativa(
+                    destinos, browser = await _gerar_com_retentativa(
                         carta,
                         p,
                         browser,
@@ -196,8 +199,7 @@ async def _gerar_varias(
                         moldura=moldura,
                         preferir_arena=preferir_arena,
                     )
-                    if destino is not None:
-                        geradas.append((destino, carta.copias))
+                    geradas.extend((destino, carta.copias) for destino in destinos)
             finally:
                 with contextlib.suppress(Exception):
                     await browser.close()
@@ -218,15 +220,16 @@ async def _gerar_com_retentativa(
     pasta_destino: Path | None,
     moldura: str | None,
     preferir_arena: bool | None,
-) -> tuple[Path | None, Browser]:
+) -> tuple[list[Path], Browser]:
     """Gera a carta, tentando de novo quando a falha e passageira.
 
-    Devolve o caminho salvo (ou None) e o navegador a usar daqui pra frente -
-    quando o Chromium cai, quem segue e o que foi reaberto aqui.
+    Devolve os caminhos salvos (um por face, vazio quando desistiu) e o
+    navegador a usar daqui pra frente - quando o Chromium cai, quem segue e o
+    que foi reaberto aqui.
     """
     for tentativa in range(1, TENTATIVAS_POR_CARTA + 1):
         try:
-            destino = await _gerar_uma(
+            destinos = await _gerar_uma(
                 carta,
                 browser=browser,
                 confirmar=False,
@@ -240,7 +243,7 @@ async def _gerar_com_retentativa(
             else:
                 console.print(f"  [red]![/] Erro inesperado: {erro}")
             if isinstance(erro, ERROS_DEFINITIVOS) or tentativa == TENTATIVAS_POR_CARTA:
-                return None, browser
+                return [], browser
             # Falha do proprio gerador se resolve com uma pagina nova, que o
             # fill_card ja abre; so a queda do Chromium pede navegador novo.
             if not isinstance(erro, AppError):
@@ -251,8 +254,8 @@ async def _gerar_com_retentativa(
             else:
                 console.print("  Tentando de novo...")
         else:
-            return destino, browser
-    return None, browser
+            return destinos, browser
+    return [], browser
 
 
 async def _confirmar_moldura(carta: ScryfallCard) -> str | None:

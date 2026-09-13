@@ -58,6 +58,7 @@ async def buscar(
     aspecto_da_janela: float | None = None,
     *,
     usar_mtgpics: bool = True,
+    indice_da_face: int = 0,
 ) -> str | None:
     """Data URL com a melhor arte disponivel pra esta impressao, ou None.
 
@@ -65,16 +66,20 @@ async def buscar(
     Com ele, uma arte de formato muito diferente perde pro art_crop mesmo sendo
     maior: o gerador preenche a janela e corta o resto, entao arte torta vira
     arte cortada.
+
+    `indice_da_face` escolhe o lado da carta de duas faces. O MTGPics indexa a
+    carta inteira, sem separar as faces, entao so a frente passa por ele; o
+    verso fica no art_crop do proprio lado.
     """
     async with httpx.AsyncClient(
         timeout=TIMEOUT, follow_redirects=True, headers=rede.CABECALHOS_DE_ARQUIVO
     ) as client:
-        referencia = await _art_crop_em_ingles(client, carta)
+        referencia = await _art_crop_em_ingles(client, carta, indice_da_face)
         if referencia is None:
             return None
 
         arte = None
-        if usar_mtgpics:
+        if usar_mtgpics and indice_da_face == 0:
             arte = await _melhor_do_mtgpics(client, carta, referencia)
             if arte is not None:
                 arte = _sem_carimbo(arte)
@@ -355,20 +360,37 @@ async def _e_do_ilustrador(client: httpx.AsyncClient, ident: str, artista: str |
     return do_site in do_scryfall or do_scryfall in do_site
 
 
-async def _art_crop_em_ingles(client: httpx.AsyncClient, carta: ScryfallCard) -> bytes | None:
+def _art_crop_do_lado(dados: dict, indice_da_face: int) -> str | None:
+    """O art_crop desta face na resposta do Scryfall.
+
+    Carta de duas faces guarda a arte dentro de card_faces; o resto traz uma so,
+    no nivel de cima.
+    """
+    faces = dados.get("card_faces") or []
+    de_cima = (dados.get("image_uris") or {}).get("art_crop")
+    if indice_da_face < len(faces):
+        return ((faces[indice_da_face].get("image_uris") or {}).get("art_crop")) or de_cima
+    return de_cima
+
+
+async def _art_crop_em_ingles(
+    client: httpx.AsyncClient, carta: ScryfallCard, indice_da_face: int = 0
+) -> bytes | None:
     """O art_crop da impressao em ingles - serve de reserva e de gabarito.
 
     Impressao em portugues paga uma requisicao a mais porque o art_crop dela
     pode ser a imagem de aviso em vez da arte.
     """
-    url = carta.art_crop
+    faces = carta.card_faces or []
+    url = faces[indice_da_face].art_crop if indice_da_face < len(faces) else carta.art_crop
+    url = url or carta.art_crop
     if carta.lang != "en":
         try:
             resposta = await client.get(
                 f"{BASE_SCRYFALL}/cards/{carta.set}/{carta.collector_number}/en"
             )
             if resposta.status_code == httpx.codes.OK:
-                url = (resposta.json().get("image_uris") or {}).get("art_crop") or url
+                url = _art_crop_do_lado(resposta.json(), indice_da_face) or url
         except httpx.HTTPError:
             pass
     if not url:

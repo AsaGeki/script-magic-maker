@@ -16,7 +16,7 @@ from app.cli.stdio import configurar_stdio_utf8
 from app.cli.tempo import cronometrar
 from app.config import CARDCONJURER_DIR, PORT
 from app.errors import AppError
-from app.maker.service import MOLDURA_PADRAO, fill_card
+from app.maker.service import fill_card
 from app.qualidade import VERIFICACOES
 from app.vendor import clonar, esta_instalado, patches, tamanho_em_disco
 
@@ -81,8 +81,10 @@ def fill(
     ingles: bool = typer.Option(
         False, "--ingles", help="Aceita a carta em ingles se nao houver portugues."
     ),
-    moldura: str = typer.Option(
-        MOLDURA_PADRAO, "--moldura", help="Valor do autoFrame do Card Conjurer."
+    moldura: str | None = typer.Option(
+        None,
+        "--moldura",
+        help="Valor do autoFrame do Card Conjurer. Sem isso, a moldura da propria impressao.",
     ),
     sem_mtgpics: bool = typer.Option(
         False, "--sem-mtgpics", help="Fica na arte do Scryfall, menor."
@@ -109,11 +111,12 @@ def fill(
             )
 
     try:
-        destino = asyncio.run(_buscar_e_gerar())
+        destinos = asyncio.run(_buscar_e_gerar())
     except AppError as erro:
         console.print(f"[bold red]Erro:[/bold red] {erro.message}")
         raise typer.Exit(code=1) from erro
-    console.print(f"[bold green]OK[/bold green] salvo em [bold]{destino}[/bold]")
+    for destino in destinos:
+        console.print(f"[bold green]OK[/bold green] salvo em [bold]{destino}[/bold]")
 
 
 @app.command()

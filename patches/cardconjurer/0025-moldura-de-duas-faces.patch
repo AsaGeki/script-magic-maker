@@ -1,0 +1,251 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -935,6 +935,19 @@
+ 	} else if (frame == 'Prototype') {
+ 		group = 'Standard-3';
+ 		autoPrototypeFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '');
++	/* script-magic-maker: moldura-de-duas-faces */
++	} else if (frame == 'M15TransformFront') {
++		group = 'DFC';
++		autoTransformFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '', 'frente');
++	} else if (frame == 'M15TransformBack') {
++		group = 'DFC';
++		autoTransformFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '', 'verso');
++	} else if (frame == 'ModalRegular') {
++		group = 'Modal-1';
++		autoModalFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '', 'frente');
++	} else if (frame == 'ModalRegularBack') {
++		group = 'Modal-1';
++		autoModalFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '', 'verso');
+ 	/* script-magic-maker: moldura-de-planeswalker */
+ 	} else if (frame == 'PlaneswalkerRegular') {
+ 		group = 'Planeswalker';
+@@ -947,7 +960,10 @@
+ 	}
+ 
+ 	if (autoFramePack != frame) {
+-		loadScript('/js/frames/pack' + frame + '.js');
++		/* script-magic-maker: moldura-de-duas-faces */
++		// Frente e verso da moldura modal moram no mesmo pacote: o valor do menu
++		// precisa ser diferente pra escolher o lado, o arquivo e o mesmo.
++		loadScript('/js/frames/pack' + (PACOTE_DO_AUTOFRAME[frame] || frame) + '.js');
+ 		autoFramePack = frame;
+ 	}
+ }
+@@ -1268,6 +1284,185 @@
+ 	await card.frames.forEach(item => addFrame([], item));
+ 	card.frames.reverse();
+ }
++/* script-magic-maker: moldura-de-duas-faces */
++// packM15TransformFront.js, packM15TransformBack.js e packModalRegular.js so
++// sao alcancaveis pelo seletor manual de pacote. As bounds e os campos de texto
++// aqui sao os deles.
++//
++// A carta de duas faces rende duas imagens, uma por lado, e cada lado tem
++// moldura propria: na transformada muda o arquivo e quase toda mascara; na
++// modal muda so o arquivo, porque as mascaras sao as mesmas dos dois lados.
++var PACOTE_DO_AUTOFRAME = {ModalRegularBack: 'ModalRegular'};
++var MASCARAS_DA_TRANSFORMADA = {
++	frente: {
++		'Pinline': '/img/frames/m15/transform/regular/maskPinlineFront.png',
++		'Title': '/img/frames/m15/transform/regular/maskTitle.png',
++		'Type': '/img/frames/m15/regular/m15MaskType.png',
++		'Rules': '/img/frames/m15/transform/regular/maskRulesFront.png',
++		'Frame': '/img/frames/m15/transform/regular/maskFrameFront.png',
++		'Border': '/img/frames/m15/transform/regular/maskBorderFront.png'
++	},
++	verso: {
++		'Pinline': '/img/frames/m15/transform/regular/maskPinlineBack.png',
++		'Title': '/img/frames/m15/transform/regular/maskTitle.png',
++		'Type': '/img/frames/m15/regular/m15MaskType.png',
++		'Rules': '/img/frames/m15/regular/m15MaskRules.png',
++		'Frame': '/img/frames/m15/transform/regular/maskFrameBack.png',
++		'Border': '/img/frames/m15/regular/m15MaskBorder.png'
++	}
++};
++// O simbolo do canto muda de edicao pra edicao (lua, sol, bussola, fagulha) e o
++// Scryfall nao traz campo que diga qual: fica a seta, que e a generica do
++// catalogo.
++var SIMBOLO_DA_TRANSFORMADA = {
++	name: 'Transform Icon',
++	src: '/img/frames/m15/transform/icons/default.png',
++	masks: [],
++	bounds: {x: 0.0594, y: 0.0505, width: 0.0734, height: 0.0524}
++};
++// O pacote so tem moldura colorida, de artefato e de terreno; criatura incolor
++// que nao e artefato cai na de artefato, como na M15 comum.
++function letraDaDuplaFace(letter, comTerreno) {
++	letter = letter.toUpperCase();
++	if (letter.length > 1) {
++		letter = comTerreno && letter.endsWith('L') ? 'L' : letter[0];
++	}
++	return letter == 'C' ? 'A' : letter;
++}
++function makeTransformFrameByLetter(letter, mask, lado) {
++	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'A': 'Artifact', 'L': 'Land'};
++	letter = letraDaDuplaFace(letter, true);
++	if (mask == 'PT') {
++		var arquivo = lado == 'frente'
++			? '/img/frames/m15/regular/m15PT' + letraDaDuplaFace(letter, false) + '.png'
++			: '/img/frames/m15/transform/regular/pt' + letraDaDuplaFace(letter, false) + '.png';
++		return {
++			name: frameNames[letter] + ' Power/Toughness',
++			src: arquivo,
++			masks: [],
++			bounds: {x: 0.7573, y: 0.8848, width: 0.188, height: 0.0733}
++		};
++	}
++	return {
++		name: frameNames[letter] + ' ' + mask,
++		src: '/img/frames/m15/transform/regular/' + (lado == 'frente' ? 'front' : 'back') + letter + '.png',
++		masks: [{src: MASCARAS_DA_TRANSFORMADA[lado][mask], name: mask}]
++	};
++}
++async function autoTransformFrame(colors, mana_cost, type_line, power, lado) {
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	// resetOthers desligado pra nao refazer o rodape: quem escolhe o estilo dele
++	// e quem chamou, antes desta moldura.
++	await resetCardIrregularities({resetOthers: false});
++	card.version = lado == 'frente' ? 'm15TransformFront' : 'm15TransformBack';
++	card.artBounds = {x: 0.0767, y: 0.1129, width: 0.8476, height: 0.4429};
++	autoFitArt();
++	card.setSymbolBounds = {x: 0.9213, y: 0.5910, width: 0.12, height: 0.0410, vertical: 'center', horizontal: 'right'};
++	resetSetSymbol();
++	card.watermarkBounds = {x: 0.5, y: 0.7762, width: 0.75, height: 0.2305};
++	resetWatermark();
++	// O titulo e a linha de tipo do verso sao brancos, e a frente ainda traz o
++	// poder/resistencia do outro lado em cinza, na beirada da caixa de regras.
++	var claro = lado == 'verso' ? 'white' : undefined;
++	var campos = {
++		mana: {name: 'Mana Cost', text: '', y: 0.0613, width: 0.9292, height: 71/2100, oneLine: true, size: 71/1638, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0},
++		title: {name: 'Title', text: '', x: 0.16, y: 0.0522, width: 0.7547, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0381, color: claro},
++		type: {name: 'Type', text: '', x: 0.0854, y: 0.5664, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0324, color: claro},
++		rules: {name: 'Rules Text', text: '', x: 0.086, y: 0.6303, width: 0.828, height: 0.2875, size: 0.0362},
++		pt: {name: 'Power/Toughness', text: '', x: 0.7928, y: 0.902, width: 0.1367, height: 0.0372, size: 0.0372, font: 'belerenbsc', oneLine: true, align: 'center', color: claro}
++	};
++	if (lado == 'frente') {
++		campos.reminder = {name: 'Reverse PT', text: '', x: 0.086, y: 0.842, width: 0.838, height: 0.0362, size: 0.0291, oneLine: true, color: '#666', align: 'right', font: 'belerenbsc'};
++	}
++	loadTextOptions(campos);
++
++	var properties = cardFrameProperties(colors, mana_cost, type_line, power);
++	var frames = [SIMBOLO_DA_TRANSFORMADA];
++	if (properties.pt) {
++		frames.push(makeTransformFrameByLetter(properties.pt, 'PT', lado));
++	}
++	frames.push(makeTransformFrameByLetter(properties.pinline, 'Pinline', lado));
++	frames.push(makeTransformFrameByLetter(properties.typeTitle, 'Type', lado));
++	frames.push(makeTransformFrameByLetter(properties.typeTitle, 'Title', lado));
++	frames.push(makeTransformFrameByLetter(properties.rules, 'Rules', lado));
++	frames.push(makeTransformFrameByLetter(properties.frame, 'Frame', lado));
++	frames.push(makeTransformFrameByLetter(properties.frame, 'Border', lado));
++
++	card.frames = frames;
++	card.frames.reverse();
++	await card.frames.forEach(item => addFrame([], item));
++	card.frames.reverse();
++}
++var MASCARAS_DO_MODAL = {
++	'Flipside': '/img/frames/modal/regular/reminder.svg',
++	'Pinline': '/img/frames/modal/regular/pinline.svg',
++	'Title': '/img/frames/modal/regular/title.svg',
++	'Type': '/img/frames/m15/regular/m15MaskType.png',
++	'Rules': '/img/frames/modal/regular/textbox.svg',
++	'MDFC Arrow': '/img/frames/modal/titleMDFCArrow.svg',
++	'Frame': '/img/frames/modal/regular/frame.svg',
++	'Border': '/img/frames/modal/regular/border.svg'
++};
++function makeModalFrameByLetter(letter, mask, lado) {
++	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'A': 'Artifact', 'L': 'Land'};
++	letter = letraDaDuplaFace(letter, true);
++	if (mask == 'PT') {
++		return {
++			name: frameNames[letter] + ' Power/Toughness',
++			src: '/img/frames/m15/regular/m15PT' + letraDaDuplaFace(letter, false) + '.png',
++			masks: [],
++			bounds: {x: 0.7573, y: 0.8848, width: 0.188, height: 0.0733}
++		};
++	}
++	return {
++		name: frameNames[letter] + ' ' + mask + ' (' + lado + ')',
++		src: '/img/frames/modal/regular/' + letter.toLowerCase() + (lado == 'verso' ? 'b' : '') + '.png',
++		masks: [{src: MASCARAS_DO_MODAL[mask], name: mask}]
++	};
++}
++async function autoModalFrame(colors, mana_cost, type_line, power, lado) {
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	await resetCardIrregularities({resetOthers: false});
++	card.version = 'modalRegular';
++	card.artBounds = {x: 0.0767, y: 0.1129, width: 0.8476, height: 0.4429};
++	autoFitArt();
++	card.setSymbolBounds = {x: 0.9213, y: 0.5910, width: 0.12, height: 0.0410, vertical: 'center', horizontal: 'right'};
++	resetSetSymbol();
++	card.watermarkBounds = {x: 0.5, y: 0.7762, width: 0.75, height: 0.2305};
++	resetWatermark();
++	loadTextOptions({
++		mana: {name: 'Mana Cost', text: '', y: 0.0613, width: 0.9292, height: 71/2100, oneLine: true, size: 71/1638, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0},
++		title: {name: 'Title', text: '', x: 0.1614, y: 0.0522, width: 0.7534, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0381},
++		type: {name: 'Type', text: '', x: 0.0854, y: 0.5664, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0324},
++		rules: {name: 'Rules Text', text: '', x: 0.086, y: 0.6303, width: 0.828, height: 0.2875, size: 0.0362},
++		flipsideType: {name: 'Flipside Type', text: '', x: 0.068, y: 0.892, width: 0.364, height: 0.0391, size: 0.0234, color: 'white', oneLine: true, font: 'belerenb'},
++		flipSideReminder: {name: 'Flipside Text', text: '', x: 0.068, y: 0.892, width: 0.364, height: 0.0391, size: 0.0258, color: 'white', oneLine: true, align: 'right'},
++		pt: {name: 'Power/Toughness', text: '', x: 0.7928, y: 0.902, width: 0.1367, height: 0.0372, size: 0.0372, font: 'belerenbsc', oneLine: true, align: 'center'}
++	});
++
++	var properties = cardFrameProperties(colors, mana_cost, type_line, power);
++	var frames = [];
++	if (properties.pt) {
++		frames.push(makeModalFrameByLetter(properties.pt, 'PT', lado));
++	}
++	frames.push(makeModalFrameByLetter(properties.typeTitle, 'MDFC Arrow', lado));
++	frames.push(makeModalFrameByLetter(properties.pinline, 'Flipside', lado));
++	frames.push(makeModalFrameByLetter(properties.pinline, 'Pinline', lado));
++	frames.push(makeModalFrameByLetter(properties.typeTitle, 'Type', lado));
++	frames.push(makeModalFrameByLetter(properties.typeTitle, 'Title', lado));
++	frames.push(makeModalFrameByLetter(properties.rules, 'Rules', lado));
++	frames.push(makeModalFrameByLetter(properties.frame, 'Frame', lado));
++	frames.push(makeModalFrameByLetter(properties.frame, 'Border', lado));
++
++	card.frames = frames;
++	card.frames.reverse();
++	await card.frames.forEach(item => addFrame([], item));
++	card.frames.reverse();
++}
+ /* script-magic-maker: moldura-de-planeswalker */
+ // packPlaneswalkerRegular.js e packPlaneswalkerBorderless.js so sao alcancaveis
+ // pelo seletor manual de pacote. Os dois sao a mesma moldura em duas roupas: a
+@@ -6611,7 +6806,13 @@
+ 
+ function processScryfallCard(card, responseCards) {
+ 	if ('card_faces' in card) {
+-		card.card_faces.forEach(face => {
++		card.card_faces.forEach((face, indice) => {
++			/* script-magic-maker: face-identificada-no-import */
++			// O import trata cada face como uma carta da lista, e sem isso nao
++			// da pra dizer qual impressao nem qual lado se quer: o id fica so na
++			// carta de cima e o indice, em lugar nenhum.
++			face.id = card.id;
++			face.indiceDaFace = indice;
+ 			face.set = card.set;
+ 			face.rarity = card.rarity;
+ 			face.collector_number = card.collector_number;
+diff --git a/creator/index.html b/creator/index.html
+--- a/creator/index.html
++++ b/creator/index.html
+@@ -749,6 +749,11 @@
+ 							<option value="Levelers">Leveler</option>
+ 							<!-- script-magic-maker: moldura-de-prototipo -->
+ 							<option value="Prototype">Prototype</option>
++							<!-- script-magic-maker: moldura-de-duas-faces -->
++							<option value="M15TransformFront">Transform (Front)</option>
++							<option value="M15TransformBack">Transform (Back)</option>
++							<option value="ModalRegular">Modal DFC (Front)</option>
++							<option value="ModalRegularBack">Modal DFC (Back)</option>
+ 							<!-- script-magic-maker: moldura-de-planeswalker -->
+ 							<option value="PlaneswalkerRegular">Planeswalker</option>
+ 							<option value="PlaneswalkerBorderless">Planeswalker (Borderless)</option>

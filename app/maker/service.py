@@ -20,7 +20,7 @@ from PIL import Image
 from playwright.async_api import Browser, Page, Route, async_playwright
 
 from app.cards.enums import Layout, Rarity
-from app.cards.models import ScryfallCard
+from app.cards.models import FaceBase, ScryfallCard
 from app.cards.palavras_chave import palavras_de_habilidade
 from app.cards.service import e_terreno_basico
 from app.config import (
@@ -28,7 +28,7 @@ from app.config import (
     HEADLESS,
     OUTPUT_DIR,
 )
-from app.errors import BadRequestError, UpstreamError
+from app.errors import UpstreamError
 from app.maker import arte
 from app.maker.browser import carregar
 from app.slug import nome_de_arquivo
@@ -64,6 +64,10 @@ MOLDURAS = {
     "Virada": "Flip",
     "Dividida": "Split",
     "Ficha": "TokenRegular-1",
+    "Transformada (frente)": "M15TransformFront",
+    "Transformada (verso)": "M15TransformBack",
+    "Modal (frente)": "ModalRegular",
+    "Modal (verso)": "ModalRegularBack",
 }
 
 # O caminho de volta: da moldura escolhida pro rotulo que o menu mostra.
@@ -87,6 +91,23 @@ MOLDURA_PADRAO = "M15Regular-1"
 TIPO_DE_COLECAO_DE_PIADA = "funny"
 
 
+def _moldura_de_terreno_basico(carta: ScryfallCard) -> str:
+    """A moldura de arte cheia mais proxima desta impressao de terreno basico.
+
+    A carta de papel nao tem janela de arte nem caixa de regras, so a borda da
+    cor e o simbolo de mana no canto, e nenhuma moldura de carta comum chega
+    nisso.
+    """
+    # Sem borda vai mais longe: arte na carta inteira, nome na faixa de baixo.
+    if carta.border_color != "borderless":
+        return MOLDURAS["Terreno basico de arte cheia"]
+    # Colecao de piada (UNF, UST) imprime o nome no topo. Sao as 20 das 74
+    # impressoes sem borda que fazem isso, e o set_type as separa sozinho.
+    if carta.set_type == TIPO_DE_COLECAO_DE_PIADA:
+        return MOLDURAS["Terreno basico sem borda com nome no topo"]
+    return MOLDURAS["Terreno basico sem borda"]
+
+
 def moldura_sugerida(carta: ScryfallCard) -> str:  # noqa: PLR0911 - um return por familia de moldura
     """Moldura do #autoFrame mais proxima da impressao real.
 
@@ -100,18 +121,8 @@ def moldura_sugerida(carta: ScryfallCard) -> str:  # noqa: PLR0911 - um return p
     # arte de um lado e texto do outro.
     if carta.layout in MOLDURA_DO_LAYOUT:
         return MOLDURAS[MOLDURA_DO_LAYOUT[carta.layout]]
-    # Antes das outras: a carta de papel nao tem janela de arte nem caixa de
-    # regras, so a borda da cor e o simbolo de mana no canto, e nenhuma moldura
-    # de carta comum chega nisso.
     if e_terreno_basico(carta) and carta.full_art:
-        # Sem borda vai mais longe: arte na carta inteira, nome na faixa de baixo.
-        if carta.border_color == "borderless":
-            # Colecao de piada (UNF, UST) imprime o nome no topo. Sao as 20 das 74
-            # impressoes sem borda que fazem isso, e o set_type as separa sozinho.
-            if carta.set_type == TIPO_DE_COLECAO_DE_PIADA:
-                return MOLDURAS["Terreno basico sem borda com nome no topo"]
-            return MOLDURAS["Terreno basico sem borda"]
-        return MOLDURAS["Terreno basico de arte cheia"]
+        return _moldura_de_terreno_basico(carta)
     if "etched" in efeitos:
         return MOLDURAS["Etched"]
     # Antes do full art: arte cheia E sem borda fica melhor na borderless, que
@@ -165,17 +176,65 @@ PACOTE_INICIAL = "M15Regular-1"
 # qual, pela data da impressao.
 PRIMEIRA_EDICAO_COM_NUMERO_DE_QUATRO_DIGITOS = date(2023, 4, 21)
 
-# Cada um destes rende duas imagens, uma por face, e o fluxo daqui salva uma so.
+# Cada um destes rende uma imagem por face. Meld fica de fora de proposito: no
+# Scryfall ele e uma carta de face unica, e o verso impresso e metade da carta
+# que o encontro forma - nao ha o que gerar com o dado que vem.
 LAYOUTS_DE_DUAS_FACES = frozenset(
     {
         Layout.TRANSFORM,
         Layout.MODAL_DFC,
-        Layout.MELD,
         Layout.REVERSIBLE_CARD,
         Layout.DOUBLE_FACED_TOKEN,
         Layout.ART_SERIES,
     }
 )
+
+# A moldura de cada lado, na ordem em que a carta imprime. Layout de duas faces
+# fora deste mapa fica com a moldura escolhida nos dois lados.
+# Toda carta de duas faces tem exatamente dois lados.
+NUMERO_DE_LADOS = 2
+
+MOLDURA_DAS_FACES = {
+    Layout.TRANSFORM: ("Transformada (frente)", "Transformada (verso)"),
+    Layout.MODAL_DFC: ("Modal (frente)", "Modal (verso)"),
+}
+
+
+def _imagens_da_carta(carta: ScryfallCard) -> int:
+    """Quantas imagens esta carta rende.
+
+    Dividida, virada e aventura tambem tem card_faces, mas as duas metades
+    saem na mesma carta: so layout de duas faces vira mais de uma imagem.
+    """
+    if carta.layout in LAYOUTS_DE_DUAS_FACES and carta.card_faces:
+        return len(carta.card_faces)
+    return 1
+
+
+def _dados_da_face(carta: ScryfallCard, indice_da_face: int) -> FaceBase:
+    """De onde saem nome, tipo, texto e custo desta imagem.
+
+    So carta de duas faces desce pra face; nas outras o fluxo continua lendo o
+    nivel de cima, e a segunda metade entra pelo script da moldura dela.
+    """
+    if carta.layout in LAYOUTS_DE_DUAS_FACES and carta.card_faces:
+        return carta.card_faces[indice_da_face]
+    return carta
+
+
+def _molduras_das_faces(carta: ScryfallCard, moldura: str) -> list[str]:
+    """A moldura de cada imagem da carta.
+
+    Numa carta de duas faces a escolha de quem chamou nao se aplica: a moldura
+    da frente nao serve pro verso, e cada lado tem a sua.
+    """
+    if _imagens_da_carta(carta) == 1:
+        return [moldura]
+    nomes = MOLDURA_DAS_FACES.get(carta.layout)
+    if nomes is None:
+        return [moldura] * _imagens_da_carta(carta)
+    return [MOLDURAS[nome] for nome in nomes]
+
 
 _IMPRESSAO_DIGITAL = carregar("impressao-digital")
 
@@ -246,7 +305,29 @@ def _marca_dagua(carta: ScryfallCard, moldura: str) -> tuple[str, str] | None:
     return MARCA_DAGUA_DE_TERRENO.get(simbolo.group(1)) if simbolo else None
 
 
-def _texto_de_reserva(carta: ScryfallCard) -> str:
+def _sem_o_rodape_do_outro_lado(carta: ScryfallCard, face: FaceBase) -> str | None:
+    """O texto impresso da face sem o que a faixa de baixo diz do outro lado.
+
+    A carta modal em portugues chega com a linha de tipo do outro lado, e o que
+    vem depois dela, coladas no fim do printed_text. Isso e moldura, nao regra:
+    o corte e na ultima linha igual aquela linha de tipo.
+    """
+    texto = face.printed_text
+    faces = carta.card_faces or []
+    if not texto or len(faces) != NUMERO_DE_LADOS:
+        return texto
+    outra = faces[1] if face.name == faces[0].name else faces[0]
+    tipo = (outra.printed_type_line or "").strip()
+    if not tipo:
+        return texto
+    linhas = texto.split("\n")
+    for indice in range(len(linhas) - 1, -1, -1):
+        if linhas[indice].strip() == tipo:
+            return "\n".join(linhas[:indice]).rstrip()
+    return texto
+
+
+def _texto_de_reserva(carta: ScryfallCard, face: FaceBase) -> str:
     """Texto de regras pro caso do Scryfall nao trazer o traduzido.
 
     Terreno basico fica de fora: printed_text nulo ali nao e dado faltando, e a
@@ -254,7 +335,7 @@ def _texto_de_reserva(carta: ScryfallCard) -> str:
     """
     if e_terreno_basico(carta):
         return ""
-    return carta.texto_exibido or ""
+    return _sem_o_rodape_do_outro_lado(carta, face) or face.oracle_text or ""
 
 
 def _rodape_de_quatro_digitos(carta: ScryfallCard) -> bool:
@@ -265,20 +346,22 @@ def _rodape_de_quatro_digitos(carta: ScryfallCard) -> bool:
     )
 
 
-def _custo_de_cor(carta: ScryfallCard) -> str:
+def _custo_de_cor(carta: ScryfallCard, face: FaceBase) -> str:
     """O custo de mana que o autoFrame le pra escolher a cor da moldura.
 
     Ficha nao tem custo, e sem ele a Fada azul e o Inseto preto-verde caem na
     moldura de artefato. As cores do Scryfall viram simbolos so pra essa
     leitura; o custo de verdade volta logo depois (ver aplicar-moldura.js).
     """
-    # Carta de duas metades traz os dois custos juntos ("{2}{W}{B} // {W}{B}"),
-    # e o cardFrameProperties le a barra como simbolo hibrido. So o da frente
-    # decide a cor da moldura.
-    da_frente = carta.faces[0].mana_cost if carta.card_faces else carta.mana_cost
-    if da_frente:
-        return da_frente
-    return "".join(f"{{{cor}}}" for cor in carta.colors or [])
+    # Quando a imagem sai de uma face, vale o custo dela. Quando as metades
+    # dividem uma imagem so, o nivel de cima traz os dois custos juntos
+    # ("{2}{W}{B} // {W}{B}") e o cardFrameProperties leria a barra como simbolo
+    # hibrido: ali decide o da primeira metade.
+    if face is carta and carta.card_faces:
+        face = carta.card_faces[0]
+    if face.mana_cost:
+        return face.mana_cost
+    return "".join(f"{{{cor}}}" for cor in face.colors or carta.colors or [])
 
 
 def _nome_da_metade(face, indice: int) -> str:
@@ -325,22 +408,25 @@ def _e_planeswalker(carta: ScryfallCard) -> bool:
     return "planeswalker" in (carta.type_line or "").lower()
 
 
-def _texto_traduzido(carta: ScryfallCard) -> str | None:
-    """Texto de regras a impor na impressao em ingles, ou None pra deixar o que
-    o Scryfall trouxer.
+def _texto_traduzido(carta: ScryfallCard, face: FaceBase) -> str | None:
+    """Texto de regras a impor no import, ou None pra deixar o que o Scryfall
+    trouxer.
 
     Terreno basico impoe vazio: o lembrete em ingles do oracle_text nao existe
     na carta de papel. Carta comum sem PT nenhum impoe o texto emprestado de
     uma irma (ver completar_traducao_pos_corte) quando ele existir.
     """
+    limpo = _sem_o_rodape_do_outro_lado(carta, face)
     if carta.lang != "en":
-        return None
+        # O import ja poe o printed_text no lugar do oracle_text; so vale impor
+        # quando o corte do rodape mudou alguma coisa.
+        return limpo if limpo != face.printed_text else None
     if e_terreno_basico(carta):
         return ""
-    return carta.printed_text
+    return limpo
 
 
-def _flavor_traduzido(carta: ScryfallCard) -> str | None:
+def _flavor_traduzido(carta: ScryfallCard, face: FaceBase) -> str | None:
     """Historia a impor na impressao em ingles, ou None pra deixar a do
     Scryfall.
 
@@ -348,9 +434,9 @@ def _flavor_traduzido(carta: ScryfallCard) -> str | None:
     campo direto. Quando a traducao veio emprestada de uma irma,
     completar_traducao_pos_corte ja trocou o campo pela versao em portugues.
     """
-    if carta.lang != "en" or not carta.printed_name:
+    if carta.lang != "en" or not face.printed_name:
         return None
-    return carta.flavor_text
+    return face.flavor_text
 
 
 def _host(url: str) -> str:
@@ -464,13 +550,19 @@ async def _esperar_desenho(page: Page) -> None:
     raise UpstreamError(f"O desenho nao estabilizou em {TEMPO_LIMITE_DESENHO:.0f}s")
 
 
-async def _selecionar_impressao(page: Page, carta: ScryfallCard) -> bool:
-    """Escolhe no gerador a mesma impressao que a consulta trouxe.
+async def _selecionar_impressao(page: Page, carta: ScryfallCard, indice_da_face: int) -> bool:
+    """Escolhe no gerador a mesma impressao - e a mesma face - que a consulta
+    trouxe.
 
     Devolve se precisou mesmo trocar: trocar a toa dispara uma segunda consulta
     da edicao e o numero do colecionador sai duplicado ("187/361/361").
     """
-    indice = await page.evaluate("(id) => scryfallCard.findIndex(c => c.id === id)", carta.id)
+    indice = await page.evaluate(
+        """(alvo) => scryfallCard.findIndex(
+            (c) => c.id === alvo.id && (c.indiceDaFace || 0) === alvo.face
+        )""",
+        {"id": carta.id, "face": indice_da_face},
+    )
     if indice is None or indice < 0:
         # A impressao exata nao veio na busca do gerador. Fica a que o
         # importCard() aplicou sozinho: um indice arbitrario pode nao ser opcao
@@ -498,7 +590,9 @@ async def _aspecto_da_janela_de_arte(page: Page) -> float | None:
     )
 
 
-async def _aplicar_arte(page: Page, carta: ScryfallCard, *, usar_mtgpics: bool) -> None:
+async def _aplicar_arte(
+    page: Page, carta: ScryfallCard, indice_da_face: int, *, usar_mtgpics: bool
+) -> None:
     """Troca a arte que o gerador achou sozinho pela maior disponivel.
 
     Quem escolhe e confere e o app.maker.arte; aqui a imagem so e entregue.
@@ -512,6 +606,7 @@ async def _aplicar_arte(page: Page, carta: ScryfallCard, *, usar_mtgpics: bool) 
             carta,
             await _aspecto_da_janela_de_arte(page),
             usar_mtgpics=usar_mtgpics,
+            indice_da_face=indice_da_face,
         )
     if data_url is None:
         raise UpstreamError(f"{carta.nome_exibido}: não foi possível baixar a arte da impressão")
@@ -602,6 +697,26 @@ async def _aplicar_classe(page: Page, carta: ScryfallCard) -> None:
     if carta.layout != Layout.CLASS:
         return
     await page.evaluate(_APLICAR_CLASSE)
+    await _esperar_desenho(page)
+
+
+_APLICAR_DUAS_FACES = carregar("aplicar-duas-faces")
+
+
+async def _aplicar_duas_faces(page: Page, carta: ScryfallCard, indice_da_face: int) -> None:
+    """Depois da moldura: os campos que falam do outro lado so existem nela, e o
+    import, que trata cada face como uma carta, nunca os preenche."""
+    if _imagens_da_carta(carta) == 1 or not carta.card_faces:
+        return
+    outro = carta.card_faces[1 - indice_da_face]
+    await page.evaluate(
+        _APLICAR_DUAS_FACES,
+        {
+            "ptDoOutroLado": f"{outro.power}/{outro.toughness}" if outro.power else "",
+            "tipoDoOutroLado": outro.tipo_exibido or "",
+            "custoDoOutroLado": outro.mana_cost or "",
+        },
+    )
     await _esperar_desenho(page)
 
 
@@ -716,19 +831,21 @@ async def _aplicar_raridade(page: Page, carta: ScryfallCard) -> None:
 _APLICAR_NOME_TRADUZIDO = carregar("aplicar-nome-traduzido")
 
 
-async def _aplicar_nome_traduzido(page: Page, carta: ScryfallCard, *, preferir_arena: bool) -> None:
+async def _aplicar_nome_traduzido(
+    page: Page, carta: ScryfallCard, face: FaceBase, *, preferir_arena: bool
+) -> None:
     """Poe no titulo o nome traduzido montado fora do Scryfall: o do terreno
     basico sem impressao em portugues e o do MTG Arena."""
     if carta.lang != "en":
         return
     do_arena = carta.arena.nome if preferir_arena and carta.arena else None
-    nome = do_arena or carta.printed_name
+    nome = do_arena or face.printed_name
     if not nome:
         return
     await page.evaluate(_APLICAR_NOME_TRADUZIDO, nome)
 
 
-async def _aplicar_moldura(page: Page, carta: ScryfallCard, moldura: str) -> None:
+async def _aplicar_moldura(page: Page, carta: ScryfallCard, face: FaceBase, moldura: str) -> None:
     """Refaz a moldura automatica com a linha de tipo em ingles (ver
     _APLICAR_MOLDURA). Depois do import: e ele que enche card.text.type."""
     await page.evaluate(
@@ -738,9 +855,9 @@ async def _aplicar_moldura(page: Page, carta: ScryfallCard, moldura: str) -> Non
     await page.evaluate(
         _APLICAR_MOLDURA,
         {
-            "tipoIngles": carta.type_line or "",
-            "regrasIngles": carta.oracle_text or "",
-            "custoDeCor": _custo_de_cor(carta),
+            "tipoIngles": face.type_line or "",
+            "regrasIngles": face.oracle_text or "",
+            "custoDeCor": _custo_de_cor(carta, face),
             "custosDasMetades": _custos_das_metades(carta),
         },
     )
@@ -759,32 +876,45 @@ async def _esperar_fontes(page: Page) -> None:
 OPACIDADE_MINIMA_DO_CANVAS = 0.9
 
 
-def _checar_desenho_completo(carta: ScryfallCard, png: bytes) -> None:
+def _checar_desenho_completo(face: FaceBase, png: bytes) -> None:
     histograma = Image.open(BytesIO(png)).convert("RGBA").getchannel("A").histogram()
     opacos = sum(histograma[11:])
     fracao = opacos / sum(histograma)
     if fracao < OPACIDADE_MINIMA_DO_CANVAS:
         raise UpstreamError(
-            f"{carta.nome_exibido}: o canvas saiu {fracao:.0%} pintado, o desenho nao terminou"
+            f"{face.nome_exibido}: o canvas saiu {fracao:.0%} pintado, o desenho nao terminou"
         )
 
 
+# Como cada lado entra no nome do arquivo, na ordem em que a carta imprime.
+LADO_DA_FACE = ("frente", "verso")
+
+
 async def _salvar(
-    page: Page, carta: ScryfallCard, pasta_destino: Path | None, moldura: str
+    page: Page,
+    carta: ScryfallCard,
+    face: FaceBase,
+    indice_da_face: int,
+    pasta_destino: Path | None,
+    moldura: str,
 ) -> Path:
     await _esperar_fontes(page)
     data_url = await page.evaluate("() => cardCanvas.toDataURL('image/png')")
     if not data_url or not data_url.startswith("data:image/png;base64,"):
         raise UpstreamError("O canvas nao devolveu uma imagem PNG")
     conteudo = base64.b64decode(data_url.split(",", 1)[1])
-    _checar_desenho_completo(carta, conteudo)
+    _checar_desenho_completo(face, conteudo)
 
     pasta = pasta_destino or PASTA_CARTAS_AVULSAS
     pasta.mkdir(parents=True, exist_ok=True)
-    partes = [carta.nome_exibido, carta.set, carta.collector_number]
+    partes = [face.nome_exibido, carta.set, carta.collector_number]
     # Sem o sufixo, gerar a mesma impressao noutra moldura sobrescreveria.
-    if moldura != moldura_sugerida(carta):
+    if moldura != _molduras_das_faces(carta, moldura_sugerida(carta))[indice_da_face]:
         partes.append(moldura)
+    # As duas faces sao a mesma impressao: sem o lado, a segunda sobrescreveria
+    # a primeira sempre que as duas tiverem o mesmo nome.
+    if _imagens_da_carta(carta) > 1:
+        partes.append(LADO_DA_FACE[indice_da_face])
     destino = pasta / f"{nome_de_arquivo(*partes)}.png"
     destino.write_bytes(conteudo)
     return destino
@@ -798,44 +928,37 @@ async def fill_card(
     moldura: str | None = None,
     arte_mtgpics: bool = True,
     preferir_arena: bool = False,
-) -> Path:
-    """Monta a carta no gerador e salva o PNG. Retorna o caminho salvo.
+) -> list[Path]:
+    """Monta a carta no gerador e salva o PNG. Retorna um caminho por face.
+
+    Carta de duas faces sai em duas imagens, na ordem em que a carta imprime;
+    todo o resto sai em uma.
 
     `browser` reusa um Chromium ja aberto; `pasta_destino` (default
     PASTA_CARTAS_AVULSAS) e onde o arquivo vai parar; `moldura` None deixa
-    moldura_sugerida() decidir; `preferir_arena` usa a traducao do MTG Arena
+    moldura_sugerida() decidir - e numa carta de duas faces ela nao se aplica,
+    porque cada lado tem a sua; `preferir_arena` usa a traducao do MTG Arena
     (ver app.cards.arena) quando ela existir.
     """
-    moldura = moldura or moldura_sugerida(carta)
-    if carta.layout in LAYOUTS_DE_DUAS_FACES:
-        raise BadRequestError(
-            f"{carta.nome_exibido} e uma carta de {carta.layout}, que rende duas "
-            "imagens; o gerador aqui ainda produz uma face so"
-        )
-    if _e_planeswalker(carta):
-        raise BadRequestError(
-            f"{carta.nome_exibido} e planeswalker, que pede a moldura com caixa de "
-            "lealdade; o gerador aqui monta so a moldura normal e a carta sairia errada"
-        )
+    molduras = _molduras_das_faces(carta, moldura or moldura_sugerida(carta))
+
+    async def gerar(navegador_aberto: Browser) -> list[Path]:
+        return [
+            await _preencher(
+                navegador_aberto,
+                carta,
+                (indice, moldura_da_face),
+                pasta_destino=pasta_destino,
+                arte_mtgpics=arte_mtgpics,
+                preferir_arena=preferir_arena,
+            )
+            for indice, moldura_da_face in enumerate(molduras)
+        ]
 
     if browser is not None:
-        return await _preencher(
-            browser,
-            carta,
-            pasta_destino=pasta_destino,
-            moldura=moldura,
-            arte_mtgpics=arte_mtgpics,
-            preferir_arena=preferir_arena,
-        )
+        return await gerar(browser)
     async with navegador() as proprio:
-        return await _preencher(
-            proprio,
-            carta,
-            pasta_destino=pasta_destino,
-            moldura=moldura,
-            arte_mtgpics=arte_mtgpics,
-            preferir_arena=preferir_arena,
-        )
+        return await gerar(proprio)
 
 
 def _logar_requisicao_falha(requisicao, carta: ScryfallCard) -> None:
@@ -886,12 +1009,16 @@ def _diagnosticar(page: Page, carta: ScryfallCard) -> None:
 async def _preencher(
     browser: Browser,
     carta: ScryfallCard,
+    lado: tuple[int, str],
     *,
     pasta_destino: Path | None,
-    moldura: str,
     arte_mtgpics: bool,
     preferir_arena: bool,
 ) -> Path:
+    # `lado` e o numero da face e a moldura dela (ver _molduras_das_faces): numa
+    # carta de uma imagem so, (0, a moldura escolhida).
+    indice_da_face, moldura = lado
+    face = _dados_da_face(carta, indice_da_face)
     page = await abrir_pagina(browser)
     _diagnosticar(page, carta)
     try:
@@ -927,18 +1054,20 @@ async def _preencher(
             and carta.arena is not None
             and bool(carta.arena.nome or carta.arena.texto)
         )
+
         await page.evaluate(
             _IMPORTAR_CARTAS,
             {
                 "nome": nome_busca,
                 "idAlvo": carta.id,
-                "tipoDeReserva": carta.tipo_exibido or "Card",
-                "textoDeReserva": _texto_de_reserva(carta),
+                "indiceDaFaceAlvo": indice_da_face,
+                "tipoDeReserva": face.tipo_exibido or "Card",
+                "textoDeReserva": _texto_de_reserva(carta, face),
                 # Impressao em ingles com printed_type_line so acontece quando a
                 # traducao foi montada por fora - hoje, as fichas.
-                "tipoTraduzido": (carta.printed_type_line if carta.lang == "en" else None),
-                "textoTraduzido": _texto_traduzido(carta),
-                "flavorTraduzido": _flavor_traduzido(carta),
+                "tipoTraduzido": (face.printed_type_line if carta.lang == "en" else None),
+                "textoTraduzido": _texto_traduzido(carta, face),
+                "flavorTraduzido": _flavor_traduzido(carta, face),
                 "palavrasDeHabilidade": list(await palavras_de_habilidade()),
                 "arenaId": carta.id if usar_arena else None,
                 "arenaTexto": carta.arena.texto if usar_arena else None,
@@ -958,22 +1087,23 @@ async def _preencher(
         # O importCard() ja aplica a primeira impressao sozinho: deixar essa
         # rodada terminar evita corrida na consulta da edicao.
         await _esperar_desenho(page)
-        if await _selecionar_impressao(page, carta):
+        if await _selecionar_impressao(page, carta, indice_da_face):
             await _esperar_desenho(page)
-        await _aplicar_moldura(page, carta, moldura)
+        await _aplicar_moldura(page, carta, face, moldura)
         await _aplicar_saga(page, carta)
         await _aplicar_classe(page, carta)
+        await _aplicar_duas_faces(page, carta, indice_da_face)
         await _aplicar_vanguarda(page, carta)
         await _aplicar_aventura(page, carta)
         await _aplicar_virada(page, carta)
         await _aplicar_dividida(page, carta)
         await _aplicar_selo(page, carta)
         await _aplicar_marca_dagua(page, carta, moldura)
-        await _aplicar_nome_traduzido(page, carta, preferir_arena=usar_arena)
+        await _aplicar_nome_traduzido(page, carta, face, preferir_arena=usar_arena)
         await _aplicar_raridade(page, carta)
         await _redesenhar_texto_final(page)
-        await _aplicar_arte(page, carta, usar_mtgpics=arte_mtgpics)
-        return await _salvar(page, carta, pasta_destino, moldura)
+        await _aplicar_arte(page, carta, indice_da_face, usar_mtgpics=arte_mtgpics)
+        return await _salvar(page, carta, face, indice_da_face, pasta_destino, moldura)
     finally:
         # Com o navegador ja caido, fechar o contexto estoura - e a excecao do
         # `finally` substituiria a que explica o que deu errado de verdade.

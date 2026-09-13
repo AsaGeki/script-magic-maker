@@ -133,5 +133,5 @@ fluxo segue com o que o Scryfall trouxe.
   molduras por XHR, que `file://` bloqueia. Ele monta cabeçalho e rodapé em volta
   dos fragmentos HTML e declara `charset=utf-8` — sem isso o acento do próprio
   código vira lixo na imagem.
-- Carta de duas faces, planeswalker e alguns layouts são **recusados** por
-  `fill_card()`, não gerados errado.
+- `fill_card()` devolve **uma imagem por face**: carta de duas faces sai em
+  duas, na ordem em que a carta imprime, e todo o resto sai em uma.

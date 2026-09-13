@@ -15,10 +15,14 @@
 // indice 0 - a impressao mais recente do nome, nao a pedida. Buscar o id
 // direto (fetchScryfallCardByID) quando ele faltar cobre esse caso.
 (args) => {
-    const { nome, idAlvo, tipoDeReserva, textoDeReserva, tipoTraduzido, textoTraduzido, flavorTraduzido, arenaId, arenaTexto, arenaFlavor, palavrasDeHabilidade } = args;
+    const { nome, idAlvo, indiceDaFaceAlvo, tipoDeReserva, textoDeReserva, tipoTraduzido, textoTraduzido, flavorTraduzido, arenaId, arenaTexto, arenaFlavor, palavrasDeHabilidade } = args;
     // Lista do MTGJSON (ver app.cards.palavras_chave): diz quais palavras antes
     // do travessao saem em italico. Sem ela o changeCardIndex usa a embutida.
     window.palavrasDeHabilidade = palavrasDeHabilidade || [];
+
+    // Carta de duas faces entra na lista como duas entradas com o mesmo id (ver
+    // face-identificada-no-import): so o numero da face separa uma da outra.
+    const eOAlvo = (c) => c.id === idAlvo && (c.indiceDaFace || 0) === indiceDaFaceAlvo;
 
     const prosseguir = (cards) => {
         cards.forEach((c) => {
@@ -31,7 +35,7 @@
             // Traducao montada fora do Scryfall: a linha de tipo das fichas
             // (app.cards.fichas), o texto vazio do terreno basico e o texto e a
             // historia emprestados de uma irma em portugues.
-            if (c.id === idAlvo) {
+            if (eOAlvo(c)) {
                 if (tipoTraduzido) c.type_line = tipoTraduzido;
                 if (textoTraduzido !== null) c.oracle_text = textoTraduzido;
                 if (flavorTraduzido) c.flavor_text = flavorTraduzido;
@@ -45,7 +49,7 @@
         });
         // importCard() desenha a impressao do indice 0 sozinho: pondo a nossa na
         // frente ele acerta de primeira, sem uma composicao inteira jogada fora.
-        const indiceAlvo = cards.findIndex((c) => c.id === idAlvo);
+        const indiceAlvo = cards.findIndex(eOAlvo);
         if (indiceAlvo > 0) {
             const [alvo] = cards.splice(indiceAlvo, 1);
             cards.unshift(alvo);
@@ -54,7 +58,7 @@
     };
 
     fetchScryfallData(nome, (cards) => {
-        if (cards.some((c) => c.id === idAlvo)) {
+        if (cards.some(eOAlvo)) {
             prosseguir(cards);
             return;
         }

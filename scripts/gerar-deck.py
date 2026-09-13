@@ -86,15 +86,16 @@ async def main() -> None:
                         await traduzir_terreno_basico(carta)
                         await completar_traducao_parcial(carta)
                         await completar_moldura_do_ingles(carta)
-                        caminho = await fill_card(
+                        caminhos = await fill_card(
                             carta,
                             browser=navegador,
                             pasta_destino=destino,
                             moldura=moldura_sugerida(carta),
                             preferir_arena=preferir_traducao_do_arena(carta),
                         )
-                        geradas.append((caminho, carta.copias))
-                        print(f"{indice}/{len(cartas)} OK {caminho.name}", flush=True)
+                        geradas.extend((caminho, carta.copias) for caminho in caminhos)
+                        nomes = ", ".join(caminho.name for caminho in caminhos)
+                        print(f"{indice}/{len(cartas)} OK {nomes}", flush=True)
                     except AppError as erro:
                         de_fora.append(f"{carta.nome_exibido}: {erro.message}")
                         print(f"{indice}/{len(cartas)} RECUSOU {carta.nome_exibido}", flush=True)
