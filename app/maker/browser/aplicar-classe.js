@@ -1,10 +1,15 @@
 // A moldura de classe reparte a coluna de texto em niveis de altura variavel.
-// O texto de cada um o proprio gerador ja escreveu (ver preencherNiveisDeClasse
-// no changeCardIndex); o que falta e a altura, que ele deixa nos campos do
-// painel de classe pra alguem preencher.
+// O texto de cada nivel sai do preencherNiveisDeClasse, que corta pelas marcas
+// de secao do Scryfall; a altura de cada um sai daqui, nos campos que o painel
+// de classe deixa pra preencher.
 //
-// Esses campos so existem com o versionClass.js carregado, entao a espera
-// abaixo e por ele, nao por rede.
+// O gerador so chama o preencherNiveisDeClasse durante o import, e ali os
+// campos de nivel ainda nao existem - a moldura vem depois. Por isso o texto e
+// repartido aqui, do que ficou guardado ainda com as marcas (ver
+// texto-com-marca-de-secao-guardado).
+//
+// Os campos de altura so existem com o versionClass.js carregado, entao a
+// espera abaixo e por ele, nao por rede.
 () => {
     // Onde a coluna termina, e o cabecalho de custo e nome que o classEdited()
     // soma sozinho antes de cada nivel - por isso ele nao entra nas alturas.
@@ -12,6 +17,7 @@
     const CABECALHO = 0.0481;
 
     const preencher = () => {
+        preencherNiveisDeClasse('', card.textoComSecoes || '');
         const textos = [0, 1, 2, 3]
             .map((i) => card.text['level' + i + 'c'].text || '')
             .filter((texto, i) => i === 0 || texto);
