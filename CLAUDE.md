@@ -18,7 +18,7 @@ uv run cli.py check --corrigir # aplica o que o ruff sabe arrumar sozinho
 ```
 
 As três são `ruff check`, `ruff format --check` e `ty check`, pelo interpretador
-do venv, com as versões travadas no `uv.lock`. Levam ~0,3 s com cache quente.
+do venv, com as versões travadas no `uv.lock`. Levam ~0,5 s com cache quente.
 
 ### Supressão de regra passa pelo dono
 
@@ -60,16 +60,19 @@ sem teste, morando longe do que ele conserta.
 Se a única saída for contornar por fora, dizer isso explicitamente e perguntar
 antes de escrever.
 
-### Nunca propor lista chumbada
+### Nunca chumbar lista dentro do código
 
-Nada de conjunto fixo de IDs, edições ou casos conferidos a olho como solução
-para um problema que não fecha por regra. Dado curado à mão envelhece sem aviso,
-só cobre o que alguém já olhou e mascara a ausência de uma regra de verdade.
+Nada de conjunto fixo de IDs, edições ou casos conferidos a olho **no caminho
+automático**. Dado curado à mão envelhece sem aviso, só cobre o que alguém já
+olhou e mascara a ausência de uma regra de verdade.
 
 Quando a detecção automática não fechar: dizer isso com o dado que sustenta a
 conclusão e apresentar só as opções algorítmicas — ou o "deixa como está". Ele
 prefere o defeito visível a uma correção que finge ser geral. O que ainda diverge
 da carta impressa mora em [PENDENCIAS.md](PENDENCIAS.md).
+
+A saída para o caso que não fecha por regra nenhuma é o `excecoes.toml`, e ela é
+**dele**: propor a entrada com o dado medido, e escrever só depois do aval.
 
 ### Nunca afirmar sem medir
 
@@ -93,6 +96,7 @@ como autor ou coautor.
 | `app/maker/browser/*.js` | Ajuste que **depende de dado da carta** (aplicar saga, moldura, nome traduzido) |
 | `vendor/` | Clone do Card Conjurer, ~5 GB, fora do controle de versão. Edição direta aqui **não sobrevive** ao próximo clone |
 | `app/rede.py` | O que todo módulo que fala com serviço de fora compartilha: cabeçalho, ritmo entre requisições, retentativa no 429 e validade de cache baixado. A **política de erro não mora lá** — cada chamador decide se a falha vira exceção ou log |
+| `excecoes.toml` | Correção à mão de uma impressão, com o motivo obrigatório ao lado. Lida por `app/excecoes.py`, que recusa entrada sem motivo e campo que não existe |
 | `output/` | Imagem gerada. Nunca versionado |
 | `PENDENCIAS.md` | O que ainda diverge da carta impressa, com o dado já medido sobre cada caso |
 | `DECK.md` | Formato da lista de deck |
@@ -107,19 +111,30 @@ ele geraria carta errada em silêncio.
 
 Precedência, e o motivo de cada uma:
 
-1. **Scryfall** — fonte primária de todo dado de carta. Limita requisição por IP
-   (~100 ms entre chamadas); lista de deck grande leva 429.
+1. **Scryfall** — fonte primária de todo dado de carta. A documentação dele pede
+   ~100 ms entre chamadas, mas o servidor não aguenta: medindo daqui, qualquer
+   intervalo até 0,35 s fecha no 20º pedido e 0,50 s passa 60 seguidos. É esse o
+   `INTERVALO_ENTRE_REQUISICOES`. Depois do 429 ele fica fechado por dezenas de
+   segundos e devolve a conta regressiva no `Retry-After` — encurtar a espera só
+   gasta tentativa.
 2. **MTGJSON** — acervo completo em SQLite (~650 MB, `vendor/mtgjson`), usado
    **só quando o Scryfall falha**. Mesma carta, mesma ordem de impressões, sem
    limite.
-3. **MTG Arena** (`vendor/arena`) — tradução PT de carta pós-corte. A Wizards
-   parou de imprimir em português depois de Modern Horizons 3 (`2024-06-14`), e
-   para essa carta o Arena é a única fonte oficial de português que existe.
-   Fonte secundária, só quando o Scryfall não resolve.
+3. **MTG Arena** (`vendor/arena`) — tradução PT que o Scryfall não tem: carta
+   pós-corte e o nome, a regra e a linha de tipo das fichas. A Wizards parou de
+   imprimir em português depois de Modern Horizons 3 (`2024-06-14`), e para essa
+   carta o Arena é a única fonte oficial de português que existe. Ele indexa a
+   ficha pelo número da ilustração **dele**, que não é sempre o do Scryfall — a
+   mesma ficha em outra arte só é achada pelo nome em inglês.
 4. **MTGPics** — arte em alta resolução. O art_crop do Scryfall (626x457) é
-   pequeno para uma carta gerada em 2010x2814.
+   pequeno para uma carta gerada em 2010x2814. Ao lado da ilustração ele guarda
+   papel de parede da mesma arte, com a mesma paleta e outra composição: quem
+   decide é o quanto o art_crop encaixa dentro de cada uma, não o tamanho.
+5. **hexproof.io** — símbolo de expansão com a cor da raridade, quando a
+   biblioteca do clone não tem a edição (ela para na data do clone). O
+   `svgs.scryfall.io` é o último elo e vem preto.
 
-Nenhuma das três secundárias pode derrubar quem chamou: falha nelas vira log e o
+Nenhuma das secundárias pode derrubar quem chamou: falha nelas vira log e o
 fluxo segue com o que o Scryfall trouxe.
 
 ## Detalhes que não se adivinham pelo código
@@ -135,3 +150,11 @@ fluxo segue com o que o Scryfall trouxe.
   código vira lixo na imagem.
 - `fill_card()` devolve **uma imagem por face**: carta de duas faces sai em
   duas, na ordem em que a carta imprime, e todo o resto sai em uma.
+- Campo emprestado ao `card` antes do `autoFrame()` tem que ser **lido antes do
+  primeiro `await`** de quem o usa. O `autoFrame()` é síncrono e não espera as
+  funções de moldura, então o `delete` logo depois dele roda antes de a função
+  assíncrona voltar do primeiro `await` — o campo chega lá como `undefined`.
+- O `printed_text` de carta de duas faces vem com o rodapé do outro lado colado
+  no fim, e a carta impressa abrevia o rótulo: `Criatura — Elfo Druida` vira só
+  `Elfo`. Quem corta e quem lê o rótulo é o mesmo par de funções em
+  `app/maker/service.py`.
