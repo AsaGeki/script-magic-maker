@@ -69,3 +69,16 @@ class Rarity(StrEnum):
     def _missing_(cls, value: object) -> "Rarity":
         logger.info("Raridade nova no Scryfall, caindo em UNKNOWN: %s", value)
         return cls.UNKNOWN
+
+
+# Layout que reparte a carta em duas faces com texto proprio: linha de tipo e
+# regras moram em cada face, e os campos do nivel da carta ficam vazios.
+LAYOUTS_DE_DUAS_FACES = frozenset(
+    {
+        Layout.TRANSFORM,
+        Layout.MODAL_DFC,
+        Layout.REVERSIBLE_CARD,
+        Layout.DOUBLE_FACED_TOKEN,
+        Layout.ART_SERIES,
+    }
+)

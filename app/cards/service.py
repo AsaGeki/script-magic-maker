@@ -10,9 +10,10 @@ from typing import Any
 
 import httpx
 
-from app import rede
+from app import excecoes, rede
 from app.cards import arena, mtgjson
-from app.cards.models import ScryfallCard
+from app.cards.enums import LAYOUTS_DE_DUAS_FACES
+from app.cards.models import FaceBase, ScryfallCard
 from app.errors import ConflictError, NotFoundError, UpstreamError
 
 BASE_URL = "https://api.scryfall.com"
@@ -99,7 +100,10 @@ async def _enriquecer_com_arena(cartas: list[ScryfallCard]) -> None:
     rede ou banco e tratada dentro de app.cards.arena e nunca derruba a busca.
     """
     for carta in cartas:
-        carta.arena = await arena.buscar_traducao(carta.set, carta.collector_number)
+        carta.arena = await arena.buscar_traducao(
+            carta.set, carta.collector_number, carta.oracle_text, carta.name
+        )
+        excecoes.aplicar_no_texto(carta)
 
 
 async def search_cards(nome: str, lang: str = "pt") -> list[ScryfallCard]:
@@ -305,6 +309,23 @@ async def traduzir_terreno_basico(carta: ScryfallCard) -> None:
     carta.printed_type_line = impressoes[0].printed_type_line
 
 
+def _paragrafos(texto: str | None) -> int:
+    return len([linha for linha in (texto or "").split("\n") if linha.strip()])
+
+
+def _irma_com_o_mesmo_texto(carta: ScryfallCard, irmas: list[ScryfallCard]) -> ScryfallCard:
+    """A irma em portugues cuja regra tem a forma da impressao pedida.
+
+    O lembrete entre parenteses entra ou sai conforme a impressao - o Dismember
+    sai com ele na NPH e sem ele na SPG - e quem tem a mesma contagem de
+    paragrafos do ingles daqui e quem foi impressa do mesmo jeito. Sem
+    nenhuma assim, vale a mais recente.
+    """
+    paragrafos = _paragrafos(carta.oracle_text)
+    mesmo_formato = [irma for irma in irmas if _paragrafos(irma.printed_text) == paragrafos]
+    return max(mesmo_formato or irmas, key=lambda irma: irma.released_at or date.min)
+
+
 async def completar_traducao_pos_corte(carta: ScryfallCard) -> None:
     """Poe nome, linha de tipo, regras e historia em portugues numa impressao
     sem PT nenhum (pos-corte de traducao).
@@ -331,9 +352,9 @@ async def completar_traducao_pos_corte(carta: ScryfallCard) -> None:
         if com_traducao:
             # Nome e texto saem da MESMA irma: o texto de regras repete o nome
             # da carta, e misturar duas impressoes deixa os dois discordando.
-            mais_recente = max(com_traducao, key=lambda irma: irma.released_at or date.min)
-            carta.printed_name = mais_recente.printed_name
-            carta.printed_text = mais_recente.printed_text
+            escolhida = _irma_com_o_mesmo_texto(carta, com_traducao)
+            carta.printed_name = escolhida.printed_name
+            carta.printed_text = escolhida.printed_text
 
         if carta.arena and (not carta.printed_name or not carta.printed_text):
             carta.printed_name = carta.printed_name or carta.arena.nome
@@ -348,16 +369,37 @@ async def completar_traducao_pos_corte(carta: ScryfallCard) -> None:
             do_arena = carta.arena.flavor_text if carta.arena else None
             carta.flavor_text = equivalente or do_arena or carta.flavor_text
 
+    # Depois do emprestimo, que sobrescreve o que veio antes.
+    excecoes.aplicar_no_texto(carta)
+
     # Cada campo vem de uma consulta propria, e uma que nao respondeu deixa so
     # aquele campo em ingles - o resto da carta sai traduzido do mesmo jeito.
-    faltando = [
-        nome
-        for nome, valor in (
-            ("a linha de tipo", carta.printed_type_line),
-            ("o texto de regras", carta.printed_text),
-        )
-        if not valor
-    ]
+    _avisar_traducao_incompleta(carta)
+
+
+def _onde_o_texto_mora(carta: ScryfallCard) -> list[FaceBase]:
+    """Onde ler linha de tipo e regras: as faces, ou a propria carta.
+
+    Carta de duas faces guarda os dois campos por face e deixa os da carta
+    vazios - conferir os da carta ali acusaria falta que nao existe.
+    """
+    if carta.layout in LAYOUTS_DE_DUAS_FACES and carta.card_faces:
+        return list(carta.card_faces)
+    return [carta]
+
+
+def _avisar_traducao_incompleta(carta: ScryfallCard) -> None:
+    faltando = sorted(
+        {
+            nome
+            for face in _onde_o_texto_mora(carta)
+            for nome, valor in (
+                ("a linha de tipo", face.printed_type_line),
+                ("o texto de regras", face.printed_text),
+            )
+            if not valor
+        }
+    )
     if faltando:
         logger.warning(
             '"%s": traducao incompleta - %s %s em ingles',
@@ -447,6 +489,21 @@ async def _tem_impressao_pt(client: httpx.AsyncClient, codigo_da_edicao: str) ->
     if resposta.status_code != httpx.codes.OK:
         return False
     return resposta.json().get("total_cards", 0) > 0
+
+
+async def edicao_existe(codigo_da_edicao: str) -> bool:
+    """Se o Scryfall conhece esse codigo de edicao.
+
+    Serve pra separar "a lista errou o codigo" de "essa impressao nao tem
+    portugues", que dao o mesmo 404 na busca por impressao. Falha de rede
+    devolve True: sem resposta nao da pra acusar codigo errado.
+    """
+    async with _cliente() as client:
+        try:
+            resposta = await _get(client, f"/sets/{codigo_da_edicao.lower()}")
+        except UpstreamError:
+            return True
+    return resposta.status_code != httpx.codes.NOT_FOUND
 
 
 async def list_sets(limite: int = 60, so_com_portugues: bool = True) -> list[dict]:

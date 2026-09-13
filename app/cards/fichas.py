@@ -35,8 +35,15 @@ TRAVESSAO = "—"
 
 # Pegam o subtipo que so existe em ficha (Tesouro, Comida, Pista), que carta
 # nenhuma tem pra consultar.
-_SUBTIPO_EN = re.compile(r"\b([A-Z][\w'/-]*(?:\s+[A-Z][\w'/-]*)*)\s+tokens?\b")
-_SUBTIPO_PT = re.compile(r"\bfichas?\s+de\s+([A-ZÀ-Ú][\wÀ-ÿ'/-]*(?:\s+[A-ZÀ-Ú][\wÀ-ÿ'/-]*)*)")
+# Entre o subtipo e a palavra "token" cabem palavras minusculas de tipo, cor e
+# poder/resistencia: "a 0/1 colorless Eldrazi Spawn creature token". A captura
+# larga demais morre na conferencia de `_subtipo_do_lembrete`.
+_SUBTIPO_EN = re.compile(r"\b([A-Z][\w'/-]*(?:\s+[A-Z][\w'/-]*)*)\s+(?:[a-z0-9/+-]+\s+)*tokens?\b")
+# O mesmo do lado portugues: "ficha de criatura Prole Eldrazi incolor 0/1". O
+# subtipo e a primeira sequencia em maiuscula depois das minusculas.
+_SUBTIPO_PT = re.compile(
+    r"\bfichas?\s+de\s+(?:[a-zà-ú0-9/+-]+\s+)*([A-ZÀ-Ú][\wÀ-ÿ'/-]*(?:\s+[A-ZÀ-Ú][\wÀ-ÿ'/-]*)*)"
+)
 
 # A palavra vem DEPOIS do tipo, como o espanhol faz ("Artefacto ficha - Tesoro")
 # e como o portugues ja faz com supertipo ("Criatura Lendaria"). Nao ha ficha em
@@ -137,11 +144,16 @@ async def _montar_ficha(
     ficha.printed_type_line = await _linha_de_tipo_em_portugues(client, ficha, criadora)
 
     nome = ficha.arena.nome if ficha.arena else None
-    # So o que sai de dentro de um lembrete precisa virar frase; a linha solta
-    # ja e uma ("Voar", que na carta impressa nem leva ponto).
-    regra = _como_texto_da_ficha(
-        _regra_em_portugues(criadora, ficha) or await _regra_de_outra_criadora(client, ficha)
-    ) or await _linha_solta_em_portugues(client, ficha)
+    # O Arena traz a regra da propria ficha; o lembrete da carta-mae e uma
+    # reconstrucao. So o que sai de dentro de um lembrete precisa virar frase;
+    # a linha solta ja e uma ("Voar", que na carta impressa nem leva ponto).
+    regra = (
+        (ficha.arena.texto if ficha.arena else None)
+        or _como_texto_da_ficha(
+            _regra_em_portugues(criadora, ficha) or await _regra_de_outra_criadora(client, ficha)
+        )
+        or await _linha_solta_em_portugues(client, ficha)
+    )
     if nome or regra:
         # Pelo caminho que o gerador ja usa pra texto nao impresso.
         ficha.arena = TraducaoArena(
@@ -181,8 +193,64 @@ async def _linha_de_tipo_em_portugues(
     if subtipos_pt is None:
         subtipos_pt = _subtipo_do_lembrete(criadora, subtipos_en)
     if subtipos_pt is None:
+        subtipos_pt = await _subtipo_palavra_por_palavra(client, subtipos_en)
+    if subtipos_pt is None:
         return None
     return f"{esquerda} {TRAVESSAO} {subtipos_pt}"
+
+
+async def _subtipo_palavra_por_palavra(client: httpx.AsyncClient, em_ingles: str) -> str | None:
+    """Cada subtipo traduzido sozinho, quando juntos nao existem em carta.
+
+    "Zombie Snake Druid" nao e a linha de nenhuma carta impressa, mas Zumbi,
+    Cobra e Druida sao cada um a linha de varias. So vale com mais de um
+    subtipo: com um so, quem ja falhou foi a busca pela metade inteira.
+    """
+    palavras = em_ingles.split()
+    if len(palavras) < MINIMO_PRA_QUEBRAR_O_SUBTIPO:
+        return None
+    traduzidas = []
+    for palavra in palavras:
+        traduzida = await _metade_traduzida(
+            client, palavra, subtipo=True
+        ) or await _subtipo_acompanhado(client, palavra)
+        if traduzida is None:
+            return None
+        traduzidas.append(traduzida)
+    return " ".join(traduzidas)
+
+
+async def _subtipo_acompanhado(client: httpx.AsyncClient, em_ingles: str) -> str | None:
+    """Um subtipo tirado de uma carta que o traz junto de outros.
+
+    Nao ha carta que seja so "Druid": toda uma e "Elf Druid", "Human Druid".
+    O portugues traduz subtipo por subtipo e na mesma ordem, entao a palavra
+    na mesma posicao e a traducao - com a mesma contagem dos dois lados, pra
+    nao casar posicao com posicao errada.
+    """
+    await rede.respeitar_ritmo()
+    try:
+        resposta = await client.get(
+            f"{BASE_SCRYFALL}/cards/search",
+            params={"q": f't:"{em_ingles}" lang:pt', "unique": "cards"},
+        )
+    except httpx.HTTPError:
+        return None
+    if resposta.status_code != httpx.codes.OK:
+        return None
+
+    for bruta in resposta.json().get("data", []):
+        traduzida = bruta.get("printed_type_line")
+        if not traduzida:
+            continue
+        subtipos_en = _metade(bruta.get("type_line", ""), subtipo=True).split()
+        subtipos_pt = _metade(traduzida, subtipo=True).split()
+        if len(subtipos_en) != len(subtipos_pt):
+            continue
+        for indice, palavra in enumerate(subtipos_en):
+            if palavra.lower() == em_ingles.lower():
+                return subtipos_pt[indice]
+    return None
 
 
 async def _metade_traduzida(
@@ -227,11 +295,22 @@ def _subtipo_do_lembrete(criadora: ScryfallCard, em_ingles: str) -> str | None:
     Mesma conferencia de `_regra_em_portugues`: o subtipo lido do ingles tem
     que bater com o da ficha antes de valer a leitura do portugues.
     """
-    achado_en = _SUBTIPO_EN.search(criadora.oracle_text or "")
-    if not achado_en or achado_en.group(1).strip().lower() != em_ingles.lower():
+    # Varre todos os casamentos: a regex captura demais no comeco da frase, e o
+    # subtipo de verdade pode estar depois dessa captura.
+    if not any(
+        achado.group(1).strip().lower() == em_ingles.lower()
+        for achado in _SUBTIPO_EN.finditer(criadora.oracle_text or "")
+    ):
         return None
     achado_pt = _SUBTIPO_PT.search(criadora.printed_text or "")
-    return achado_pt.group(1).strip() if achado_pt else None
+    if not achado_pt:
+        return None
+    subtipo_pt = achado_pt.group(1).strip()
+    # O portugues traduz subtipo por subtipo: contagem diferente quer dizer que
+    # a captura pegou outra coisa.
+    if len(subtipo_pt.split()) != len(em_ingles.split()):
+        return None
+    return subtipo_pt
 
 
 def _regra_em_portugues(criadora: ScryfallCard, ficha: ScryfallCard) -> str | None:
@@ -247,6 +326,10 @@ def _regra_em_portugues(criadora: ScryfallCard, ficha: ScryfallCard) -> str | No
         return None
     return _ability_entre_aspas(criadora.printed_text)
 
+
+# Quebrar a metade so ajuda com mais de um subtipo: com um so, quem falhou foi a
+# busca pela metade inteira, que e a mesma busca.
+MINIMO_PRA_QUEBRAR_O_SUBTIPO = 2
 
 # Quantas cartas consultar procurando o lembrete traduzido antes de desistir.
 CANDIDATAS_DE_LEMBRETE = 8
@@ -333,12 +416,19 @@ def _mesma_linha(em_ingles: str, alvo: str) -> bool:
 
 
 def _ability_entre_aspas(texto: str | None) -> str | None:
-    """A habilidade entre aspas dentro do primeiro lembrete que tiver uma."""
+    """A habilidade entre aspas: no primeiro lembrete que tiver uma ou, na
+    falta de lembrete, no texto solto.
+
+    A carta que cria ficha com habilidade costuma citar a habilidade na propria
+    frase, fora de parentese: "creature token with "Sacrifice this creature:
+    Add {C}."". Quem chama confere a extracao contra o oracle_text da ficha.
+    """
     for lembrete in _LEMBRETE.findall(texto or ""):
         entre_aspas = _ENTRE_ASPAS.search(lembrete)
         if entre_aspas:
             return _sem_ponto_final(entre_aspas.group(1))
-    return None
+    entre_aspas = _ENTRE_ASPAS.search(texto or "")
+    return _sem_ponto_final(entre_aspas.group(1)) if entre_aspas else None
 
 
 def _como_texto_da_ficha(regra: str | None) -> str | None:

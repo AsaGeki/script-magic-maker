@@ -28,16 +28,19 @@ URL_BANCO = (
 )
 TIMEOUT = 60.0
 
-# {oT} = tap, {oC} = incolor, {o1} = generico... o Arena usa o mesmo simbolo
-# do Scryfall com um "o" extra na frente.
+# {oT} = tap, {oC} = incolor, {o1} = generico... o Arena usa o mesmo simbolo do
+# Scryfall com um "o" extra na frente, e empacota o custo inteiro entre uma
+# chave so: "{o1oB}" sao dois simbolos, "{oWoUoBoRoG}" sao cinco.
 _SIMBOLO_ARENA = re.compile(r"\{o([^}]*)\}")
 
 _bancos: dict[str, dict] = {}
-_indice_pt: dict[tuple[str, str], dict] | None = None
+# Os indices sao montados na primeira busca e guardados aqui dentro: o dict e
+# mutado, nunca trocado, entao nenhuma funcao precisa de `global`.
+_indices: dict[str, dict[tuple[str, str], dict]] = {}
 _trava = asyncio.Lock()
 # Depois de uma falha, para de tentar pelo resto do processo: senao uma busca
 # com dezenas de cartas repete o mesmo timeout de rede uma vez por carta.
-_falhou = False
+_estado = {"falhou": False}
 
 
 @dataclass
@@ -138,22 +141,34 @@ def _onde_mora_no_scryfall(
     return (set_scryfall.lower(), str(carta["CollectorNumber"]))
 
 
+def _abrir_simbolos(achado: re.Match[str]) -> str:
+    """Um par de chaves por simbolo, e o hibrido sem os parenteses do Arena:
+    "{o1oB}" vira "{1}{B}" e "{o(B/G)}" vira "{B/G}"."""
+    return "".join(
+        f"{{{simbolo.strip('()')}}}" for simbolo in achado.group(1).split("o") if simbolo
+    )
+
+
 def _transformar_texto(bruto: str, nome_traduzido: str) -> str:
     """Do jeito que o Arena guarda pro jeito que o Scryfall guarda."""
-    texto = _SIMBOLO_ARENA.sub(r"{\1}", bruto)
+    texto = _SIMBOLO_ARENA.sub(_abrir_simbolos, bruto)
     return texto.replace("CARDNAME", nome_traduzido)
 
 
-def _reconstruir_regras(
-    carta_pt: dict, banco_pt: dict, banco_en: dict, nome_traduzido: str
-) -> str | None:
-    """Junta as linhas de AbilityIds, ou None se alguma ainda esta em ingles.
+def _habilidades(
+    carta_pt: dict,
+    banco_pt: dict,
+    banco_en: dict,
+    nome_traduzido: str,
+    nome_em_ingles: str,
+) -> list[tuple[str | None, str]] | None:
+    """(ingles, portugues) de cada habilidade, ou None se alguma nao traduziu.
 
     A traducao do Arena e por linha, nao por carta: e comum uma habilidade vir
     traduzida e a de baixo nao. Aqui e tudo ou nada - uma linha identica ao
     ingles derruba a carta inteira pro "sem regra confiavel".
     """
-    linhas = []
+    pares: list[tuple[str | None, str]] = []
     for id_habilidade in carta_pt.get("AbilityIds", []):
         chave = str(id_habilidade)
         linha_pt = banco_pt.get("abilities", {}).get(chave)
@@ -162,44 +177,140 @@ def _reconstruir_regras(
             return None
         if linha_en is not None and linha_pt == linha_en:
             return None
-        linhas.append(linha_pt)
-    if not linhas:
+        pares.append(
+            (
+                _transformar_texto(linha_en, nome_em_ingles) if linha_en else None,
+                _transformar_texto(linha_pt, nome_traduzido),
+            )
+        )
+    return pares or None
+
+
+def _minuscula_inicial(texto: str) -> str:
+    return texto[:1].lower() + texto[1:]
+
+
+def _traduzir_linha(linha: str, por_ingles: dict[str, str]) -> str | None:
+    """A linha do ingles em portugues, ou None se alguma parte nao tem par.
+
+    Tenta a linha inteira primeiro; so quebra nas virgulas se ela nao existir
+    como habilidade - assim "Exile target creature, then draw a card." nao vira
+    duas buscas. A caixa da inicial segue a do ingles: numa linha de
+    palavras-chave so a primeira comeca em maiuscula.
+    """
+    inteira = por_ingles.get(linha.casefold())
+    if inteira is not None:
+        return inteira
+    partes = []
+    for pedaco in linha.split(", "):
+        traduzido = por_ingles.get(pedaco.casefold())
+        if traduzido is None:
+            return None
+        partes.append(traduzido if pedaco[:1].isupper() else _minuscula_inicial(traduzido))
+    return ", ".join(partes)
+
+
+def _nas_linhas_do_ingles(
+    texto_em_ingles: str | None, habilidades: list[tuple[str | None, str]]
+) -> str | None:
+    """O portugues com a quebra de linha da carta em ingles, ou None.
+
+    O Arena guarda uma habilidade por linha e a carta impressa junta as
+    palavras-chave com virgula: sem isso o Eldrazi de sete palavras-chave sai em
+    sete linhas, e a carta impressa tem quatro.
+    """
+    if not texto_em_ingles:
         return None
-    return "\n".join(_transformar_texto(linha, nome_traduzido) for linha in linhas)
+    por_ingles = {ingles.casefold(): pt for ingles, pt in habilidades if ingles}
+    if not por_ingles:
+        return None
+    linhas = []
+    for linha in texto_em_ingles.split("\n"):
+        traduzida = _traduzir_linha(linha, por_ingles)
+        if traduzida is None:
+            return None
+        linhas.append(traduzida)
+    return "\n".join(linhas)
 
 
-async def buscar_traducao(codigo_da_edicao: str, numero: str) -> TraducaoArena | None:
+def _construir_indice_de_ficha(
+    banco_en: dict, indice: dict[tuple[str, str], dict]
+) -> dict[tuple[str, str], dict]:
+    """(edicao de ficha, nome em ingles) -> ficha do Arena.
+
+    A mesma ficha sai em varios numeros do Scryfall, um por ilustracao, e o
+    Arena guarda so o da arte dele: "Eldrazi Spawn" e TMH3 2 la e TMH3 38 aqui.
+    Dentro de uma edicao de ficha o nome em ingles identifica a ficha - a arte
+    muda, a regra nao.
+    """
+    por_nome: dict[tuple[str, str], dict] = {}
+    for (edicao, _), carta_pt in indice.items():
+        if not carta_pt.get("IsToken"):
+            continue
+        nome_en = banco_en.get("cards", {}).get(str(carta_pt.get("GrpId")), {}).get("Name")
+        if nome_en:
+            por_nome.setdefault((edicao, nome_en.casefold()), carta_pt)
+    return por_nome
+
+
+async def buscar_traducao(
+    codigo_da_edicao: str,
+    numero: str,
+    texto_em_ingles: str | None = None,
+    nome_em_ingles: str | None = None,
+) -> TraducaoArena | None:
     """A traducao do Arena pra impressao exata, se existir no banco.
 
+    `texto_em_ingles` e o oracle_text da carta: e dele que sai a quebra de
+    linha (ver _nas_linhas_do_ingles). Sem ele vale a do Arena, uma habilidade
+    por linha.
+
+    `nome_em_ingles` so entra em ficha, quando o numero nao bate (ver
+    _construir_indice_de_ficha).
+
     None quando a carta nao esta no Arena, quando a regra nao saiu traduzida
-    (ver _reconstruir_regras) ou quando o banco nao pode ser baixado: esta
-    fonte nunca trava quem chamou.
+    (ver _habilidades) ou quando o banco nao pode ser baixado: esta fonte nunca
+    trava quem chamou.
     """
-    global _indice_pt, _falhou  # noqa: PLW0603 - cache do modulo, ver o topo
-    if _falhou:
+    if _estado["falhou"]:
         return None
     try:
         banco_pt = await _carregar("pt")
         banco_en = await _carregar("en")
     except (httpx.HTTPError, OSError) as erro:
-        _falhou = True
+        _estado["falhou"] = True
         logger.warning("Traducao do Arena desativada nesta execucao: %s", erro)
         return None
-    if _indice_pt is None:
-        _indice_pt = _construir_indice(banco_pt)
+    if "impressao" not in _indices:
+        _indices["impressao"] = _construir_indice(banco_pt)
+        _indices["ficha"] = _construir_indice_de_ficha(banco_en, _indices["impressao"])
 
-    carta_pt = _indice_pt.get((codigo_da_edicao.lower(), numero))
+    edicao = codigo_da_edicao.lower()
+    carta_pt = _indices["impressao"].get((edicao, numero))
+    if carta_pt is None and nome_em_ingles:
+        carta_pt = _indices["ficha"].get((edicao, nome_em_ingles.casefold()))
     if carta_pt is None:
         return None
     carta_en = banco_en.get("cards", {}).get(str(carta_pt["GrpId"]), {})
 
     nome = carta_pt.get("Name") or ""
-    if not nome or nome == carta_en.get("Name"):
-        return None  # nome identico ao ingles = nao traduzido de verdade
+    if not nome:
+        return None
+
+    habilidades = _habilidades(carta_pt, banco_pt, banco_en, nome, carta_en.get("Name") or "")
+    # Nome de personagem nao muda de idioma - "Tifa Lockhart" e "Vivi Ornitier"
+    # saem iguais nos dois. Nome igual so prova que a entrada nao tem portugues
+    # nenhum quando a regra tambem nao tem.
+    if nome == carta_en.get("Name") and habilidades is None:
+        return None
 
     flavor = carta_pt.get("FlavorText") or None
     if flavor and flavor == carta_en.get("FlavorText"):
         flavor = None
 
-    texto = _reconstruir_regras(carta_pt, banco_pt, banco_en, nome)
+    texto = None
+    if habilidades is not None:
+        texto = _nas_linhas_do_ingles(texto_em_ingles, habilidades) or "\n".join(
+            pt for _, pt in habilidades
+        )
     return TraducaoArena(nome=nome, texto=texto, flavor_text=flavor)

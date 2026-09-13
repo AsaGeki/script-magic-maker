@@ -9,6 +9,7 @@ from app.cards.models import ScryfallCard
 from app.cards.service import (
     completar_traducao_pos_corte,
     e_terreno_basico,
+    edicao_existe,
     find_card_by_name,
     find_card_by_print,
 )
@@ -138,6 +139,15 @@ async def _resolver(entrada: EntradaDeDeck, permitir_ingles: bool) -> ScryfallCa
                 await completar_traducao_pos_corte(carta_en)
                 if _e_a_carta_da_linha(entrada.nome, carta_en):
                     return carta_en
+            if carta_en is None and not await edicao_existe(entrada.set):
+                # Codigo de edicao que nao existe da o mesmo 404 de impressao
+                # sem portugues, e sem dizer isso o aviso final so mostra que
+                # veio outra edicao, nunca por que.
+                logger.warning(
+                    '"%s": a edicao "%s" nao existe - a lista errou o codigo?',
+                    entrada.nome,
+                    entrada.set.upper(),
+                )
             logger.info(
                 '"%s": impressao %s #%s nao encontrada em PT, procurando a carta '
                 "em outra edicao antes de cair pro ingles",
