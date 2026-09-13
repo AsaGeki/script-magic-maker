@@ -9,6 +9,7 @@ excecao (app.cards.service) ou log com degradacao (app.deck.legalidade).
 """
 
 import asyncio
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -18,21 +19,25 @@ import httpx
 
 from app.config import SCRYFALL_USER_AGENT
 
+logger = logging.getLogger(__name__)
+
 # O Scryfall pede User-Agent identificavel em vez de chave de API.
 CABECALHOS_DE_API = {"User-Agent": SCRYFALL_USER_AGENT, "Accept": "application/json"}
 
 # Pra imagem e pagina HTML, onde pedir JSON so confundiria o servidor.
 CABECALHOS_DE_ARQUIVO = {"User-Agent": SCRYFALL_USER_AGENT}
 
-# O Scryfall pede ~100ms entre requisicoes; respeitado antes de cada chamada.
-INTERVALO_ENTRE_REQUISICOES = 0.1
+# A documentacao do Scryfall pede ~100ms, mas o servidor nao aguenta: medindo
+# daqui, qualquer intervalo ate 0,35s fecha no 20o pedido e 0,50s passa 60.
+INTERVALO_ENTRE_REQUISICOES = 0.5
 
 TIMEOUT_PADRAO = 30.0
 
 MAX_TENTATIVAS_429 = 3
-# Teto da espera: o Scryfall as vezes manda dezenas de segundos no Retry-After,
-# e nenhuma consulta do projeto justifica esperar tanto.
-ESPERA_MAXIMA_429 = 2.0
+# Teto da espera. Depois do 429 o Scryfall fica fechado por dezenas de segundos
+# e devolve a conta regressiva no Retry-After; retentativa antes disso so gasta
+# tentativa a toa. O teto passa do maior Retry-After ja visto (60s).
+ESPERA_MAXIMA_429 = 65.0
 
 SEGUNDOS_POR_DIA = 86400
 
@@ -83,7 +88,11 @@ async def com_retentativa_no_429(
         if resposta.status_code != httpx.codes.TOO_MANY_REQUESTS:
             return resposta
         if tentativa < MAX_TENTATIVAS_429 - 1:
-            await asyncio.sleep(_espera_do_429(resposta, tentativa))
+            espera = _espera_do_429(resposta, tentativa)
+            # A espera passa de meio minuto e nada mais anda enquanto ela corre:
+            # sem aviso, a barra de progresso parece travada.
+            logger.warning("Limite de requisicao atingido; esperando %.0fs.", espera)
+            await asyncio.sleep(espera)
     return resposta
 
 
