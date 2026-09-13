@@ -1,0 +1,67 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -118,6 +118,10 @@
+ //Card Object managament
+ async function resetCardIrregularities({canvas = [getStandardWidth(), getStandardHeight(), 0, 0], resetOthers = true} = {}) {
+ 	//misc details
++	/* script-magic-maker: simbolo-girado-da-moldura-dividida */
++	// So a moldura dividida desenha simbolo deitado; sem apagar aqui, ele
++	// sobreviveria na proxima moldura carregada.
++	card.simbolosGirados = null;
+ 	card.margins = false;
+ 	card.bottomInfoTranslate = {x:0, y:0};
+ 	card.bottomInfoRotate = 0;
+@@ -5966,6 +5970,18 @@
+ 		claroContexto.fillStyle = 'white';
+ 		claroContexto.fillRect(0, 0, claro.width, claro.height);
+ 		cardContext.drawImage(claro, scaleX(card.setSymbolX), scaleY(card.setSymbolY), simboloLargura, simboloAltura);
++	} else if (card.simbolosGirados) {
++		/* script-magic-maker: simbolo-girado-da-moldura-dividida */
++		// A carta dividida tem duas faixas de tipo deitadas, e cada uma leva o
++		// seu simbolo. Cada ancora e a ponta direita da faixa (o alto, na carta
++		// em pe) e o meio dela no outro eixo; o simbolo desce a partir dali.
++		card.simbolosGirados.forEach(function(ancora) {
++			cardContext.save();
++			cardContext.translate(scaleX(ancora.x), scaleY(ancora.y));
++			cardContext.rotate(-Math.PI / 2);
++			cardContext.drawImage(setSymbol, -simboloLargura, -simboloAltura / 2, simboloLargura, simboloAltura);
++			cardContext.restore();
++		});
+ 	} else {
+ 		cardContext.drawImage(setSymbol, scaleX(card.setSymbolX), scaleY(card.setSymbolY), simboloLargura, simboloAltura);
+ 	}
+diff --git a/js/frames/packSplit.js b/js/frames/packSplit.js
+--- a/js/frames/packSplit.js
++++ b/js/frames/packSplit.js
+@@ -15,8 +15,10 @@
+ document.querySelector('#loadFrameVersion').disabled = false;
+ //defines process for loading this version, if applicable
+ document.querySelector('#loadFrameVersion').onclick = async function() {
+-	// Notification
+-	notify('At this time, rotated set symbols and second pieces of art is not an option, unless added manually with external software. Apologies for the inconvenience!', 10);
++	/* script-magic-maker: simbolo-girado-da-moldura-dividida */
++	// O aviso dizia que simbolo girado e a segunda arte nao davam. As duas dao:
++	// a arte vem montada de fora (ver arte-das-duas-metades-da-dividida) e o
++	// simbolo e desenhado girado (ver simbolo-girado-da-moldura-dividida).
+ 	//resets things so that every frame doesn't have to
+ 	await resetCardIrregularities();
+ 	//sets card version
+@@ -31,7 +33,16 @@
+ 	card.artBounds = {x:0, y:0, width:1, height:1};
+ 	autoFitArt();
+ 	//set symbol bounds
+-	card.setSymbolBounds = {x:2, y:2, width:0.12, height:0.0410, vertical:'center', horizontal: 'right'};
++	/* script-magic-maker: simbolo-girado-da-moldura-dividida */
++	// O x e o y ficam fora da tela porque quem desenha e o simbolosGirados; do
++	// resetSetSymbol so interessa o tamanho, que sai do width/height. Eles sao
++	// os da moldura normal encolhidos na mesma proporcao da faixa de tipo, que
++	// aqui tem 0.0286 contra 0.0543 la.
++	card.setSymbolBounds = {x:2, y:2, width:0.0632, height:0.0216, vertical:'center', horizontal: 'right'};
++	// Cada faixa de tipo e o campo type/type2 deitado: a ancora fica no meio
++	// dela (x + metade da altura do texto) e um fio depois da ponta, que e o
++	// y do campo menos o comprimento da faixa.
++	card.simbolosGirados = [{x:0.5700, y:0.0499}, {x:0.5700, y:0.5061}];
+ 	resetSetSymbol();
+ 	//watermark bounds
+ 	card.watermarkBounds = {x:0.5, y:0.7762, width:0.75, height:0.2305};
