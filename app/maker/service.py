@@ -602,19 +602,21 @@ async def _selecionar_impressao(page: Page, carta: ScryfallCard, indice_da_face:
     return True
 
 
-async def _aspecto_da_janela_de_arte(page: Page) -> float | None:
-    """Largura/altura da janela onde a moldura encaixa a arte.
+async def _janela_de_arte(page: Page) -> tuple[float, float, float, float] | None:
+    """(x, y, largura, altura) de onde a moldura encaixa a arte, em fracao da carta.
 
     Cada moldura tem a sua (a de saga e alta e estreita, a borderless e a carta
-    inteira), e e ela que diz que formato de arte cabe sem sobrar corte.
+    inteira). O formato dela diz que arte cabe sem sobrar corte, e a posicao diz
+    que pedaco da cena a carta impressa mostra.
     """
-    return await page.evaluate(
+    lida = await page.evaluate(
         """() => {
             const b = card.artBounds;
             if (!b || !b.width || !b.height) return null;
-            return (b.width * card.width) / (b.height * card.height);
+            return [b.x, b.y, b.width, b.height];
         }"""
     )
+    return None if lida is None else (lida[0], lida[1], lida[2], lida[3])
 
 
 async def _aplicar_arte(
@@ -631,7 +633,7 @@ async def _aplicar_arte(
     else:
         data_url = await arte.buscar(
             carta,
-            await _aspecto_da_janela_de_arte(page),
+            await _janela_de_arte(page),
             usar_mtgpics=usar_mtgpics,
             indice_da_face=indice_da_face,
         )
