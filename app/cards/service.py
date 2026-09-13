@@ -348,6 +348,24 @@ async def completar_traducao_pos_corte(carta: ScryfallCard) -> None:
             do_arena = carta.arena.flavor_text if carta.arena else None
             carta.flavor_text = equivalente or do_arena or carta.flavor_text
 
+    # Cada campo vem de uma consulta propria, e uma que nao respondeu deixa so
+    # aquele campo em ingles - o resto da carta sai traduzido do mesmo jeito.
+    faltando = [
+        nome
+        for nome, valor in (
+            ("a linha de tipo", carta.printed_type_line),
+            ("o texto de regras", carta.printed_text),
+        )
+        if not valor
+    ]
+    if faltando:
+        logger.warning(
+            '"%s": traducao incompleta - %s %s em ingles',
+            carta.printed_name,
+            " e ".join(faltando),
+            "ficam" if len(faltando) > 1 else "fica",
+        )
+
 
 async def _flavor_equivalente(
     client: httpx.AsyncClient, carta: ScryfallCard, em_portugues: list[ScryfallCard]
