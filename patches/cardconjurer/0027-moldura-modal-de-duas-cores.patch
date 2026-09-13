@@ -1,0 +1,64 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -1409,7 +1409,7 @@
+ 	'Frame': '/img/frames/modal/regular/frame.svg',
+ 	'Border': '/img/frames/modal/regular/border.svg'
+ };
+-function makeModalFrameByLetter(letter, mask, lado) {
++function makeModalFrameByLetter(letter, mask, lado, metadeDireita) {
+ 	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'A': 'Artifact', 'L': 'Land'};
+ 	letter = letraDaDuplaFace(letter, true);
+ 	if (mask == 'PT') {
+@@ -1420,11 +1420,17 @@
+ 			bounds: {x: 0.7573, y: 0.8848, width: 0.188, height: 0.0733}
+ 		};
+ 	}
+-	return {
++	var quadro = {
+ 		name: frameNames[letter] + ' ' + mask + ' (' + lado + ')',
+ 		src: '/img/frames/modal/regular/' + letter.toLowerCase() + (lado == 'verso' ? 'b' : '') + '.png',
+ 		masks: [{src: MASCARAS_DO_MODAL[mask], name: mask}]
+ 	};
++	/* script-magic-maker: moldura-modal-de-duas-cores */
++	if (metadeDireita) {
++		quadro.name += ' (direita)';
++		quadro.masks.push({src: '/img/frames/maskRightHalf.png', name: 'Right Half'});
++	}
++	return quadro;
+ }
+ async function autoModalFrame(colors, mana_cost, type_line, power, lado) {
+ 	card.frames = [];
+@@ -1454,12 +1460,32 @@
+ 		frames.push(makeModalFrameByLetter(properties.pt, 'PT', lado));
+ 	}
+ 	frames.push(makeModalFrameByLetter(properties.typeTitle, 'MDFC Arrow', lado));
++	/* script-magic-maker: moldura-modal-de-duas-cores */
++	// Carta de duas cores tem a metade direita noutra cor, e o
++	// cardFrameProperties devolve a segunda letra em pinlineRight/rulesRight/
++	// frameRight. Cada camada dessas entra por cima da esquerda, cortada pela
++	// mascara de meia carta - o mesmo caminho da M15 comum.
++	if (properties.pinlineRight) {
++		frames.push(makeModalFrameByLetter(properties.pinlineRight, 'Flipside', lado, true));
++	}
+ 	frames.push(makeModalFrameByLetter(properties.pinline, 'Flipside', lado));
++	if (properties.pinlineRight) {
++		frames.push(makeModalFrameByLetter(properties.pinlineRight, 'Pinline', lado, true));
++	}
+ 	frames.push(makeModalFrameByLetter(properties.pinline, 'Pinline', lado));
+ 	frames.push(makeModalFrameByLetter(properties.typeTitle, 'Type', lado));
+ 	frames.push(makeModalFrameByLetter(properties.typeTitle, 'Title', lado));
++	if (properties.rulesRight) {
++		frames.push(makeModalFrameByLetter(properties.rulesRight, 'Rules', lado, true));
++	}
+ 	frames.push(makeModalFrameByLetter(properties.rules, 'Rules', lado));
++	if (properties.frameRight) {
++		frames.push(makeModalFrameByLetter(properties.frameRight, 'Frame', lado, true));
++	}
+ 	frames.push(makeModalFrameByLetter(properties.frame, 'Frame', lado));
++	if (properties.frameRight) {
++		frames.push(makeModalFrameByLetter(properties.frameRight, 'Border', lado, true));
++	}
+ 	frames.push(makeModalFrameByLetter(properties.frame, 'Border', lado));
+ 
+ 	card.frames = frames;
