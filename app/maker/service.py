@@ -19,7 +19,8 @@ from pathlib import Path
 from PIL import Image
 from playwright.async_api import Browser, Page, Route, async_playwright
 
-from app.cards.enums import Layout, Rarity
+from app import excecoes
+from app.cards.enums import LAYOUTS_DE_DUAS_FACES, Layout, Rarity
 from app.cards.models import FaceBase, ScryfallCard
 from app.cards.palavras_chave import palavras_de_habilidade
 from app.cards.service import e_terreno_basico
@@ -28,7 +29,7 @@ from app.config import (
     HEADLESS,
     OUTPUT_DIR,
 )
-from app.errors import UpstreamError
+from app.errors import BadRequestError, UpstreamError
 from app.maker import arte
 from app.maker.browser import carregar
 from app.slug import nome_de_arquivo
@@ -64,6 +65,7 @@ MOLDURAS = {
     "Virada": "Flip",
     "Dividida": "Split",
     "Ficha": "TokenRegular-1",
+    "Desprovida": "M15Devoid",
     "Mutacao": "M15Mutate",
     "Nivel": "Levelers",
     "Prototipo": "Prototype",
@@ -128,7 +130,26 @@ def _moldura_de_terreno_basico(carta: ScryfallCard) -> str:
     return MOLDURAS["Terreno basico sem borda"]
 
 
-def moldura_sugerida(carta: ScryfallCard) -> str:  # noqa: PLR0911 - um return por familia de moldura
+def _moldura_imposta(carta: ScryfallCard) -> str | None:
+    """A moldura que a excecao a mao manda usar nesta impressao, se houver."""
+    excecao = excecoes.de(carta)
+    if excecao is None or excecao.moldura is None:
+        return None
+    if excecao.moldura not in MOLDURAS:
+        raise BadRequestError(
+            f"excecoes.toml, {carta.set.upper()} {carta.collector_number}: moldura "
+            f'"{excecao.moldura}" nao existe. As que existem: ' + ", ".join(sorted(MOLDURAS))
+        )
+    return MOLDURAS[excecao.moldura]
+
+
+def moldura_sugerida(carta: ScryfallCard) -> str:
+    """Moldura do #autoFrame desta impressao: a que a excecao a mao manda, ou a
+    que a regra automatica escolhe."""
+    return _moldura_imposta(carta) or _moldura_automatica(carta)
+
+
+def _moldura_automatica(carta: ScryfallCard) -> str:  # noqa: PLR0911 - um return por familia de moldura
     """Moldura do #autoFrame mais proxima da impressao real.
 
     O #autoFrame decide sozinho so cor e tipo; a familia de moldura (M15, 8a
@@ -168,6 +189,11 @@ def moldura_sugerida(carta: ScryfallCard) -> str:  # noqa: PLR0911 - um return p
         return MOLDURAS["8th Edition"]
     if carta.frame == "1997":
         return MOLDURAS["Seventh Edition"]
+    # Depois dos acabamentos, que valem mais que a desprovida quando a
+    # impressao tem os dois. Carta de duas faces tem moldura por face
+    # (MOLDURA_DAS_FACES) e nao passa por aqui.
+    if "devoid" in efeitos and carta.layout not in MOLDURA_DAS_FACES:
+        return MOLDURAS["Desprovida"]
     # frame "1993" e "future" nao tem equivalente no catalogo.
     return MOLDURA_PADRAO
 
@@ -190,6 +216,7 @@ HOSTS_LIBERADOS = (
     "localhost",
     "api.scryfall.com",
     "svgs.scryfall.io",
+    "api.hexproof.io",
 )
 
 # So pra existir um card.text na abertura: sem ele, changeCardIndex() e
@@ -206,16 +233,6 @@ PRIMEIRA_EDICAO_COM_NUMERO_DE_QUATRO_DIGITOS = date(2023, 4, 21)
 # Cada um destes rende uma imagem por face. Meld fica de fora de proposito: no
 # Scryfall ele e uma carta de face unica, e o verso impresso e metade da carta
 # que o encontro forma - nao ha o que gerar com o dado que vem.
-LAYOUTS_DE_DUAS_FACES = frozenset(
-    {
-        Layout.TRANSFORM,
-        Layout.MODAL_DFC,
-        Layout.REVERSIBLE_CARD,
-        Layout.DOUBLE_FACED_TOKEN,
-        Layout.ART_SERIES,
-    }
-)
-
 # A moldura de cada lado, na ordem em que a carta imprime. Layout de duas faces
 # fora deste mapa fica com a moldura escolhida nos dois lados.
 # Toda carta de duas faces tem exatamente dois lados.
@@ -332,26 +349,61 @@ def _marca_dagua(carta: ScryfallCard, moldura: str) -> tuple[str, str] | None:
     return MARCA_DAGUA_DE_TERRENO.get(simbolo.group(1)) if simbolo else None
 
 
-def _sem_o_rodape_do_outro_lado(carta: ScryfallCard, face: FaceBase) -> str | None:
-    """O texto impresso da face sem o que a faixa de baixo diz do outro lado.
+def _rotulos_do_outro_lado(outra: FaceBase) -> set[str]:
+    """Como a faixa de baixo pode chamar o outro lado.
 
-    A carta modal em portugues chega com a linha de tipo do outro lado, e o que
-    vem depois dela, coladas no fim do printed_text. Isso e moldura, nao regra:
-    o corte e na ultima linha igual aquela linha de tipo.
+    A carta impressa abrevia: "Criatura - Elfo Druida" sai so "Elfo" (MH3 250)
+    e "Criatura - Eldrazi" sai "Eldrazi" (MH3 253), enquanto quem nao tem
+    subtipo sai inteiro ("Feitico", ZNR 161). Cada subtipo entra na lista.
+    """
+    tipo = (outra.printed_type_line or "").strip()
+    if not tipo:
+        return set()
+    _, _, subtipos = tipo.partition("—")
+    return {tipo, *subtipos.split()}
+
+
+def _inicio_do_rodape_do_outro_lado(carta: ScryfallCard, face: FaceBase) -> int | None:
+    """Em que linha do printed_text comeca o rodape do outro lado, ou None.
+
+    A carta modal em portugues chega com o rotulo do outro lado, e o que vem
+    depois dele, colados no fim do printed_text. Isso e moldura, nao regra.
     """
     texto = face.printed_text
     faces = carta.card_faces or []
     if not texto or len(faces) != NUMERO_DE_LADOS:
-        return texto
+        return None
     outra = faces[1] if face.name == faces[0].name else faces[0]
-    tipo = (outra.printed_type_line or "").strip()
-    if not tipo:
-        return texto
+    rotulos = _rotulos_do_outro_lado(outra)
+    if not rotulos:
+        return None
     linhas = texto.split("\n")
     for indice in range(len(linhas) - 1, -1, -1):
-        if linhas[indice].strip() == tipo:
-            return "\n".join(linhas[:indice]).rstrip()
-    return texto
+        if linhas[indice].strip() in rotulos:
+            return indice
+    return None
+
+
+def _sem_o_rodape_do_outro_lado(carta: ScryfallCard, face: FaceBase) -> str | None:
+    """O texto impresso da face sem o que a faixa de baixo diz do outro lado."""
+    texto = face.printed_text
+    inicio = _inicio_do_rodape_do_outro_lado(carta, face)
+    if texto is None or inicio is None:
+        return texto
+    return "\n".join(texto.split("\n")[:inicio]).rstrip()
+
+
+def _rotulo_do_outro_lado(carta: ScryfallCard, face: FaceBase, outra: FaceBase) -> str:
+    """O que escrever na faixa de baixo sobre o outro lado.
+
+    Quem ja traz o rotulo abreviado pronto e o proprio printed_text; a linha de
+    tipo inteira so entra quando o rodape nao veio (impressao em ingles, por
+    exemplo).
+    """
+    inicio = _inicio_do_rodape_do_outro_lado(carta, face)
+    if inicio is None or not face.printed_text:
+        return outra.tipo_exibido or ""
+    return face.printed_text.split("\n")[inicio].strip()
 
 
 def _texto_de_reserva(carta: ScryfallCard, face: FaceBase) -> str:
@@ -761,12 +813,13 @@ async def _aplicar_duas_faces(page: Page, carta: ScryfallCard, indice_da_face: i
     import, que trata cada face como uma carta, nunca os preenche."""
     if _imagens_da_carta(carta) == 1 or not carta.card_faces:
         return
+    face = carta.card_faces[indice_da_face]
     outro = carta.card_faces[1 - indice_da_face]
     await page.evaluate(
         _APLICAR_DUAS_FACES,
         {
             "ptDoOutroLado": f"{outro.power}/{outro.toughness}" if outro.power else "",
-            "tipoDoOutroLado": outro.tipo_exibido or "",
+            "tipoDoOutroLado": _rotulo_do_outro_lado(carta, face, outro),
             "custoDoOutroLado": outro.mana_cost or "",
         },
     )
@@ -908,6 +961,22 @@ async def _aplicar_raridade(page: Page, carta: ScryfallCard) -> None:
     )
 
 
+_APLICAR_RODAPE_IMPOSTO = carregar("aplicar-rodape-imposto")
+
+
+async def _aplicar_rodape_imposto(page: Page, carta: ScryfallCard) -> None:
+    """Escreve no rodape o que a excecao a mao manda, quando manda.
+
+    Depois do `_aplicar_raridade`: os dois mexem no mesmo rodape e a excecao e
+    a ultima palavra.
+    """
+    excecao = excecoes.de(carta)
+    if excecao is None or not excecao.rodape:
+        return
+    campos = {excecoes.CAMPOS_DE_RODAPE[campo]: valor for campo, valor in excecao.rodape.items()}
+    await page.evaluate(_APLICAR_RODAPE_IMPOSTO, {"campos": campos})
+
+
 _APLICAR_NOME_TRADUZIDO = carregar("aplicar-nome-traduzido")
 
 
@@ -925,6 +994,12 @@ async def _aplicar_nome_traduzido(
     await page.evaluate(_APLICAR_NOME_TRADUZIDO, nome)
 
 
+def _cores_impostas(carta: ScryfallCard) -> list[str] | None:
+    """As cores que a excecao a mao manda a moldura ler, se mandar."""
+    excecao = excecoes.de(carta)
+    return None if excecao is None else excecao.cores
+
+
 async def _aplicar_moldura(page: Page, carta: ScryfallCard, face: FaceBase, moldura: str) -> None:
     """Refaz a moldura automatica com a linha de tipo em ingles (ver
     _APLICAR_MOLDURA). Depois do import: e ele que enche card.text.type."""
@@ -939,6 +1014,8 @@ async def _aplicar_moldura(page: Page, carta: ScryfallCard, face: FaceBase, mold
             "regrasIngles": face.oracle_text or "",
             "custoDeCor": _custo_de_cor(carta, face),
             "custosDasMetades": _custos_das_metades(carta),
+            "desprovida": "devoid" in (carta.frame_effects or []),
+            "coresImpostas": _cores_impostas(carta),
         },
     )
     await _esperar_desenho(page)
@@ -1058,6 +1135,26 @@ def _logar_requisicao_falha(requisicao, carta: ScryfallCard) -> None:
     )
 
 
+# Elos da cadeia do simbolo de expansao que tem outro atras (ver o patch
+# simbolo-com-a-cor-da-raridade). So o ultimo, o Scryfall, quer dizer simbolo
+# faltando de verdade.
+ELOS_DO_SIMBOLO_COM_SAIDA = ("/img/setSymbols/official/", "api.hexproof.io")
+
+# O navegador repete no console todo recurso que nao carregou, sem dizer qual
+# foi: quem tem o endereco e o _logar_resposta_de_erro.
+FALHA_DE_RECURSO_NO_CONSOLE = "Failed to load resource"
+
+
+def _logar_resposta_de_erro(resposta, carta: ScryfallCard) -> None:
+    """Resposta de erro que sobra depois de tirar a que a propria pagina
+    contorna."""
+    if resposta.status < PRIMEIRO_STATUS_DE_ERRO:
+        return
+    if any(elo in resposta.url for elo in ELOS_DO_SIMBOLO_COM_SAIDA):
+        return
+    logger.warning("%s: %s em %s", carta.nome_exibido, resposta.status, resposta.url)
+
+
 def _diagnosticar(page: Page, carta: ScryfallCard) -> None:
     """Loga erro de JS do gerador - o `drawCard()` do Card Conjurer pode
     abortar no meio (ex: a busca de arte automatica dele, que roda em paralelo
@@ -1071,19 +1168,12 @@ def _diagnosticar(page: Page, carta: ScryfallCard) -> None:
         "console",
         lambda msg: (
             logger.warning("%s: console do gerador - %s", carta.nome_exibido, msg.text)
-            if msg.type == "error"
+            if msg.type == "error" and FALHA_DE_RECURSO_NO_CONSOLE not in msg.text
             else None
         ),
     )
     page.on("requestfailed", lambda req: _logar_requisicao_falha(req, carta))
-    page.on(
-        "response",
-        lambda resp: (
-            logger.warning("%s: %s em %s", carta.nome_exibido, resp.status, resp.url)
-            if resp.status >= PRIMEIRO_STATUS_DE_ERRO
-            else None
-        ),
-    )
+    page.on("response", lambda resp: _logar_resposta_de_erro(resp, carta))
 
 
 async def _preencher(
@@ -1185,6 +1275,7 @@ async def _preencher(
         await _aplicar_marca_dagua(page, carta, moldura)
         await _aplicar_nome_traduzido(page, carta, face, preferir_arena=usar_arena)
         await _aplicar_raridade(page, carta)
+        await _aplicar_rodape_imposto(page, carta)
         await _redesenhar_texto_final(page)
         await _aplicar_arte(page, carta, indice_da_face, usar_mtgpics=arte_mtgpics)
         return await _salvar(page, carta, face, indice_da_face, pasta_destino, moldura)

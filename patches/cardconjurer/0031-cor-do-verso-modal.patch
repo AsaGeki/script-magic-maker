@@ -1,0 +1,16 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -1445,7 +1445,11 @@
+ };
+ function makeModalFrameByLetter(letter, mask, lado, metadeDireita) {
+ 	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'A': 'Artifact', 'L': 'Land'};
+-	letter = letraDaDuplaFace(letter, true);
++	/* script-magic-maker: cor-do-verso-modal */
++	// So o aro de fora do verso e de pedra: faixa do nome, linha de tipo e
++	// caixa de regras ficam na cor do terreno (ZNR 161 sai vermelho, MH3 253
++	// verde na esquerda e azul na direita).
++	letter = letraDaDuplaFace(letter, mask == 'Frame' || mask == 'Border');
+ 	if (mask == 'PT') {
+ 		return {
+ 			name: frameNames[letter] + ' Power/Toughness',

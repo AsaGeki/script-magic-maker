@@ -1,0 +1,66 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -768,6 +768,23 @@
+ 		'frameRight': frameRight
+ 	}
+ }
++
++/* script-magic-maker: moldura-incolor-fora-da-borderless */
++// Troca pela letra 'C', a moldura cinza de Eldrazi, o que o
++// cardFrameProperties() manda pra 'A' e 'L' na carta incolor. So chama quem
++// tem arquivo incolor no pacote; ficha, saga e modal nao tem.
++function comMolduraIncolor(properties, colors, typeLine) {
++	if (colors.length != 0 || typeLine.includes('Artifact') || typeLine.includes('Land') || typeLine.includes('Vehicle')) {
++		return properties;
++	}
++	['pinline', 'rules', 'typeTitle', 'pt', 'frame'].forEach(function (campo) {
++		if (properties[campo]) {
++			properties[campo] = 'C';
++		}
++	});
++	return properties;
++}
++
+ var autoFramePack;
+ function autoFrame() {
+ 	var frame = document.querySelector('#autoFrame').value;
+@@ -2180,6 +2197,11 @@
+ 	} else if (type_line.toLowerCase().includes('enchantment creature') || type_line.toLowerCase().includes('enchantment artifact')) {
+ 		style = 'Nyx';
+ 	}
++	/* script-magic-maker: moldura-incolor-fora-da-borderless */
++	// So o estilo regular tem arquivo incolor; neve e Nyx nao tem.
++	if (style == 'regular') {
++		properties = comMolduraIncolor(properties, colors, type_line);
++	}
+ 
+ 	// Set frames
+ 	if (type_line.includes('Legendary')) {
+@@ -2244,6 +2266,11 @@
+ 			style = 'Nyx';
+ 		}
+ 	}
++	/* script-magic-maker: moldura-incolor-fora-da-borderless */
++	// So o estilo regular tem arquivo incolor; ub, arte cheia, neve e Nyx nao.
++	if (style == 'regular') {
++		properties = comMolduraIncolor(properties, colors, type_line);
++	}
+ 
+ 	// Set frames
+ 	if (type_line.includes('Legendary')) {
+@@ -2862,6 +2889,14 @@
+ 		}
+ 	}
+ 
++	/* script-magic-maker: moldura-incolor-fora-da-borderless */
++	// Nao existe "m15FrameC.png": a moldura incolor deste pacote e o
++	// eldrazi.png, que o packM15Regular-1 ja registra como "Eldrazi Frame".
++	// Fica depois dos ajustes de estilo porque nem neve nem Nyx tem incolor.
++	if (letter == 'C') {
++		frame.src = '/img/frames/m15/regular/eldrazi.png';
++	}
++
+ 	if (mask) {
+ 		frame.masks = [
+ 			{

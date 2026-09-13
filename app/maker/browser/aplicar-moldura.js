@@ -31,7 +31,14 @@
     // A moldura dividida precisa do custo das DUAS metades, e so um cabe no
     // campo de custo.
     card.custosDasMetades = args.custosDasMetades;
+    // Na desprovida o custo tem simbolo colorido e a carta nao tem cor nenhuma.
+    // O autoFrame deduz a cor do custo e nao teria como saber disso sozinho.
+    card.desprovida = args.desprovida;
+    // A cor que a excecao a mao impoe, quando impoe (ver excecoes.toml).
+    card.coresImpostas = args.coresImpostas;
     autoFrame();
+    delete card.coresImpostas;
+    delete card.desprovida;
     delete card.custosDasMetades;
     devolverCusto();
     devolverRegras();

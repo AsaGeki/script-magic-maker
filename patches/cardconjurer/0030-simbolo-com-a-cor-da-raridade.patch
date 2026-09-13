@@ -1,0 +1,29 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -67,12 +67,22 @@
+ 	}
+ 	/* script-magic-maker: simbolo-de-edicao-do-scryfall */
+ 	// A biblioteca local de simbolos para na data do clone: colecao lancada
+-	// depois nao tem svg e a carta saia sem simbolo nenhum. O Scryfall publica
+-	// o svg de toda colecao - ele vem sem a cor da raridade, mas e melhor que
+-	// simbolo faltando.
++	// depois nao tem svg e a carta saia sem simbolo nenhum.
+ 	const campoDaColecao = document.querySelector('#set-symbol-code');
+ 	const codigoDaColecao = campoDaColecao ? (campoDaColecao.value || '').toLowerCase() : '';
+ 	if (codigoDaColecao && this.src.includes('/img/setSymbols/official/')) {
++		/* script-magic-maker: simbolo-com-a-cor-da-raridade */
++		// O hexproof entrega o simbolo com o degrade da raridade, que e o que a
++		// carta impressa tem; o do Scryfall vem preto. Por isso ele vem antes.
++		const campoDaRaridade = document.querySelector('#set-symbol-rarity');
++		const raridade = campoDaRaridade ? (campoDaRaridade.value || 'c').toLowerCase() : 'c';
++		this.src = 'https://api.hexproof.io/symbols/set/' + codigoDaColecao + '/' + raridade;
++		return;
++	}
++	/* script-magic-maker: simbolo-com-a-cor-da-raridade */
++	// Ultimo elo: o Scryfall publica o svg de toda colecao, sem a cor da
++	// raridade. Preto e melhor que simbolo faltando.
++	if (codigoDaColecao && this.src.includes('api.hexproof.io')) {
+ 		this.src = 'https://svgs.scryfall.io/sets/' + codigoDaColecao + '.svg';
+ 		return;
+ 	}
