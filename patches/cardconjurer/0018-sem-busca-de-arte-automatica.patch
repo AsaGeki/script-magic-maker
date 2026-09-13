@@ -1,7 +1,7 @@
 diff --git a/js/creator-23.js b/js/creator-23.js
 --- a/js/creator-23.js
 +++ b/js/creator-23.js
-@@ -5881,7 +5881,11 @@ function changeCardIndex() {
+@@ -6469,7 +6469,15 @@
  	}
  	//art
  	document.querySelector('#art-name').value = cardToImport.name;
@@ -11,6 +11,10 @@ diff --git a/js/creator-23.js b/js/creator-23.js
 +	// a busca daqui e redundante. Pior: ela carrega o art_crop pelo Chromium, e
 +	// com a imagem bloqueada na rede do navegador o HTMLImageElement fica
 +	// broken e aborta o drawCard() seguinte no meio.
++	//
++	// O nome do ilustrador vinha dessa busca, pelo changeArtIndex. Ele ja esta
++	// na carta que o import escolheu, entao sai daqui direto.
++	artistEdited(cardToImport.artist || '');
  	if (document.querySelector('#importAllPrints').checked) {
  		// document.querySelector('#art-index').value = document.querySelector('#import-index').value;
  		// changeArtIndex();
