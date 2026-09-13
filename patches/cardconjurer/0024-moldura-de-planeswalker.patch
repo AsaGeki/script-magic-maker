@@ -1,0 +1,123 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -935,6 +935,15 @@
+ 	} else if (frame == 'Prototype') {
+ 		group = 'Standard-3';
+ 		autoPrototypeFrame(colors, card.text.mana.text, card.text.type.text, card.text.pt ? card.text.pt.text : '');
++	/* script-magic-maker: moldura-de-planeswalker */
++	} else if (frame == 'PlaneswalkerRegular') {
++		group = 'Planeswalker';
++		// Planeswalker nunca tem poder/resistencia, e o campo nem existe no
++		// pacote dele.
++		autoPlaneswalkerFrame(colors, card.text.mana.text, card.text.type.text, '', 'regular');
++	} else if (frame == 'PlaneswalkerBorderless') {
++		group = 'Planeswalker';
++		autoPlaneswalkerFrame(colors, card.text.mana.text, card.text.type.text, '', 'borderless');
+ 	}
+ 
+ 	if (autoFramePack != frame) {
+@@ -1256,6 +1265,90 @@
+ 
+ 	card.frames = frames;
+ 	card.frames.reverse();
++	await card.frames.forEach(item => addFrame([], item));
++	card.frames.reverse();
++}
++/* script-magic-maker: moldura-de-planeswalker */
++// packPlaneswalkerRegular.js e packPlaneswalkerBorderless.js so sao alcancaveis
++// pelo seletor manual de pacote. Os dois sao a mesma moldura em duas roupas: a
++// normal tem janela de arte e aro, a sem borda leva a arte ate a aresta e nao
++// tem a camada de aro. As bounds e os campos de texto aqui sao os deles.
++//
++// A coluna de habilidades nao e caixa de texto: o versionPlaneswalker.js
++// desenha as faixas e os simbolos de lealdade por cima da arte, a partir da
++// altura e do custo de cada bloco (ver aplicar-planeswalker.js).
++var PASTA_DO_PLANESWALKER = {
++	regular: '/img/frames/planeswalker/regular/',
++	borderless: '/img/frames/planeswalker/borderless/'
++};
++var MASCARAS_DO_PLANESWALKER = {
++	'Pinline': '/img/frames/planeswalker/regular/planeswalkerMaskPinline.png',
++	'Title': '/img/frames/planeswalker/regular/planeswalkerMaskTitle.png',
++	'Type': '/img/frames/planeswalker/regular/planeswalkerMaskType.png',
++	'Frame': '/img/frames/planeswalker/regular/planeswalkerMaskFrame.png',
++	'Border': '/img/frames/planeswalker/regular/planeswalkerMaskBorder.png',
++	'Loyalty': '/img/frames/planeswalker/maskLoyalty.png'
++};
++function makePlaneswalkerFrameByLetter(letter, mask, estilo) {
++	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'A': 'Artifact', 'L': 'Land'};
++	letter = letter.toUpperCase();
++	// A moldura normal nao tem imagem de terreno; a de dois simbolos ("WL") so
++	// existe nas de carta comum.
++	if (letter.length > 1 || (letter == 'L' && estilo == 'regular')) {
++		letter = letter[0] == 'L' ? 'A' : letter[0];
++	}
++	var arquivo = estilo == 'regular'
++		? 'planeswalkerFrame' + letter + '.png'
++		: letter.toLowerCase() + '.png';
++	return {
++		name: frameNames[letter] + ' ' + mask,
++		src: PASTA_DO_PLANESWALKER[estilo] + arquivo,
++		masks: [{src: MASCARAS_DO_PLANESWALKER[mask], name: mask}]
++	};
++}
++async function autoPlaneswalkerFrame(colors, mana_cost, type_line, power, estilo) {
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	// resetOthers desligado pra nao refazer o rodape: quem escolhe o estilo dele
++	// e quem chamou, antes desta moldura.
++	await resetCardIrregularities({resetOthers: false});
++	card.version = estilo == 'regular' ? 'planeswalkerRegular' : 'planeswalkerBorderless';
++	card.onload = '/js/frames/versionPlaneswalker.js';
++	loadScript('/js/frames/versionPlaneswalker.js');
++	card.artBounds = estilo == 'regular'
++		? {x: 0.068, y: 0.101, width: 0.864, height: 0.8143}
++		: {x: 0, y: 0, width: 1, height: 0.9153};
++	autoFitArt();
++	card.setSymbolBounds = {x: 0.9227, y: 0.5891, width: 0.12, height: 0.0381, vertical: 'center', horizontal: 'right'};
++	resetSetSymbol();
++	card.watermarkBounds = {x: 0.5, y: 0.7762, width: 0.75, height: 0.2305};
++	resetWatermark();
++	loadTextOptions({
++		mana: {name: 'Mana Cost', text: '', y: 0.0481, width: 0.9292, height: 71/2100, oneLine: true, size: 71/1638, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0},
++		title: {name: 'Title', text: '', x: 0.0867, y: 0.0372, width: 0.8267, height: 0.0548, oneLine: true, font: 'belerenb', size: 0.0381},
++		type: {name: 'Type', text: '', x: 0.0867, y: 0.5625, width: 0.8267, height: 0.0548, oneLine: true, font: 'belerenb', size: 0.0324},
++		ability0: {name: 'Ability 1', text: '', x: 0.18, y: 0.6239, width: 0.7467, height: 0.0972, size: 0.0353},
++		ability1: {name: 'Ability 2', text: '', x: 0.18, y: 0, width: 0.7467, height: 0.0972, size: 0.0353},
++		ability2: {name: 'Ability 3', text: '', x: 0.18, y: 0, width: 0.7467, height: 0.0972, size: 0.0353},
++		ability3: {name: 'Ability 4', text: '', x: 0.18, y: 0, width: 0.7467, height: 0, size: 0.0353},
++		loyalty: {name: 'Loyalty', text: '', x: 0.806, y: 0.902, width: 0.14, height: 0.0372, size: 0.0372, font: 'belerenbsc', oneLine: true, align: 'center', color: 'white'}
++	});
++
++	var properties = cardFrameProperties(colors, mana_cost, type_line, power);
++	var frames = [];
++	frames.push(makePlaneswalkerFrameByLetter(properties.pinline, 'Loyalty', estilo));
++	frames.push(makePlaneswalkerFrameByLetter(properties.pinline, 'Pinline', estilo));
++	frames.push(makePlaneswalkerFrameByLetter(properties.typeTitle, 'Type', estilo));
++	frames.push(makePlaneswalkerFrameByLetter(properties.typeTitle, 'Title', estilo));
++	// A sem borda nao tem aro: a arte vai ate a aresta da carta.
++	if (estilo == 'regular') {
++		frames.push(makePlaneswalkerFrameByLetter(properties.frame, 'Frame', estilo));
++	}
++	frames.push(makePlaneswalkerFrameByLetter(properties.frame, 'Border', estilo));
++
++	card.frames = frames;
++	card.frames.reverse();
+ 	await card.frames.forEach(item => addFrame([], item));
+ 	card.frames.reverse();
+ }
+diff --git a/creator/index.html b/creator/index.html
+--- a/creator/index.html
++++ b/creator/index.html
+@@ -749,6 +749,9 @@
+ 							<option value="Levelers">Leveler</option>
+ 							<!-- script-magic-maker: moldura-de-prototipo -->
+ 							<option value="Prototype">Prototype</option>
++							<!-- script-magic-maker: moldura-de-planeswalker -->
++							<option value="PlaneswalkerRegular">Planeswalker</option>
++							<option value="PlaneswalkerBorderless">Planeswalker (Borderless)</option>
+ 							<option value="UBNew">Universes Beyond (Accurate)</option>
+ 
+ 							<option disabled>Custom frames</option>

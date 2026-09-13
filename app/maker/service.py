@@ -67,6 +67,8 @@ MOLDURAS = {
     "Mutacao": "M15Mutate",
     "Nivel": "Levelers",
     "Prototipo": "Prototype",
+    "Planeswalker": "PlaneswalkerRegular",
+    "Planeswalker sem borda": "PlaneswalkerBorderless",
     "Transformada (frente)": "M15TransformFront",
     "Transformada (verso)": "M15TransformBack",
     "Modal (frente)": "ModalRegular",
@@ -139,6 +141,13 @@ def moldura_sugerida(carta: ScryfallCard) -> str:  # noqa: PLR0911 - um return p
     # arte de um lado e texto do outro.
     if carta.layout in MOLDURA_DO_LAYOUT and not _fora_do_alcance_da_moldura(carta):
         return MOLDURAS[MOLDURA_DO_LAYOUT[carta.layout]]
+    # Planeswalker tem layout "normal": o que o separa e a linha de tipo. A
+    # moldura dele troca a caixa de regras pela coluna de habilidades de
+    # lealdade, e so a sem borda tem roupa propria.
+    if _e_planeswalker(carta):
+        if carta.border_color == "borderless":
+            return MOLDURAS["Planeswalker sem borda"]
+        return MOLDURAS["Planeswalker"]
     if e_terreno_basico(carta) and carta.full_art:
         return _moldura_de_terreno_basico(carta)
     if "etched" in efeitos:
@@ -762,6 +771,21 @@ async def _aplicar_duas_faces(page: Page, carta: ScryfallCard, indice_da_face: i
     await _esperar_desenho(page)
 
 
+_APLICAR_PLANESWALKER = carregar("aplicar-planeswalker")
+
+# As duas roupas da mesma moldura: as duas repartem a coluna de habilidades.
+MOLDURAS_DE_PLANESWALKER = frozenset({MOLDURAS["Planeswalker"], MOLDURAS["Planeswalker sem borda"]})
+
+
+async def _aplicar_planeswalker(page: Page, carta: ScryfallCard, moldura: str) -> None:
+    """Depois da moldura: os campos de habilidade de lealdade so existem com o
+    versionPlaneswalker.js carregado, e quem manda carregar e a moldura dele."""
+    if moldura not in MOLDURAS_DE_PLANESWALKER:
+        return
+    await page.evaluate(_APLICAR_PLANESWALKER, {"lealdade": carta.loyalty or ""})
+    await _esperar_desenho(page)
+
+
 _APLICAR_PROTOTIPO = carregar("aplicar-prototipo")
 
 
@@ -1149,6 +1173,7 @@ async def _preencher(
         await _aplicar_mutacao(page, carta)
         await _aplicar_nivel(page, carta, moldura)
         await _aplicar_prototipo(page, carta)
+        await _aplicar_planeswalker(page, carta, moldura)
         await _aplicar_duas_faces(page, carta, indice_da_face)
         await _aplicar_vanguarda(page, carta)
         await _aplicar_aventura(page, carta)
