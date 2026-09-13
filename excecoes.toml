@@ -1,0 +1,126 @@
+# Correcoes a mao, uma impressao por secao. Ver app/excecoes.py.
+#
+# A chave e "<edicao>/<numero>", como o Scryfall escreve. O campo `motivo` e
+# obrigatorio e diz por que a regra automatica nao chega la - sem ele a
+# aplicacao nao sobe.
+#
+# Campos aceitos:
+#   nome, linha_de_tipo, texto, historia   o que sai impresso na carta
+#   moldura                                chave do MOLDURAS (app/maker/service.py)
+#   cores                                  as cores que a moldura deve ler; [] = incolor
+#   numero, raridade, edicao, idioma       o rodape
+
+["tsr/280"]
+motivo = """
+Gemstone Caverns e incolor, mas o gerador le "de qualquer cor" nas regras e
+monta a moldura dourada de cinco cores. A Caverna das Almas, com a mesma
+leitura, e dourada de verdade: nao ha regra que separe as duas.
+"""
+cores = []
+
+["tmh3/38"]
+motivo = """
+O oracle do Estrondo Malevolo diz "Sacrifice this token" e o da propria ficha
+diz "Sacrifice this creature". A conferencia de app.cards.fichas recusa a
+diferenca, e sem ela a ficha sai em ingles.
+"""
+texto = "Sacrifique esta criatura: Adicione {C}."
+
+["mh3/458"]
+motivo = """
+A impressao de arte estendida traz "Eternizar {2}{G}{G}" sem o lembrete. A
+unica irma em portugues (MH3 152) traz o lembrete inteiro, e e dela que o texto
+vem emprestado.
+"""
+texto = """
+{T}: Adicione {G}.
+Feroz — {T}: Adicione {G}{G}{G}{G}. Ative somente se você controlar uma criatura com poder igual ou superior a 4.
+Eternizar {2}{G}{G}
+"""
+
+["cm2/253"]
+motivo = """
+Commander Anthology II imprime o total de cards no rodape ("253/312"), e o
+Scryfall nao guarda esse total em lugar nenhum da impressao.
+"""
+numero = "253/312"
+
+# --- deck final-fantasy -------------------------------------------------------
+#
+# FIN, FIC e FCA nunca sairam em portugues: o Scryfall nao tem impressao PT, o
+# MTGJSON tem 0 linha pt nas tres (so frances, alemao, italiano, japones e
+# espanhol) e o banco do Arena guarda a string em ingles no campo pt. O texto
+# abaixo e traducao minha, seguindo o padrao da Wizards - nao e texto oficial.
+
+["fin/206"]
+motivo = """
+Tifa Lockhart so existe em FIN, que nunca saiu em portugues. O nome nao muda de
+idioma e a linha da Conquista nunca foi traduzida no Arena.
+"""
+nome = "Tifa Lockhart"
+linha_de_tipo = "Criatura Lendária — Humano Monge"
+texto = """
+Atropelar
+Conquista — Toda vez que um terreno que você controla entrar no campo de batalha, dobre o poder de Tifa Lockhart até o final do turno.
+"""
+historia = "\"Eu sei muito bem cuidar de mim mesma, sabia?\""
+
+["fin/248"]
+motivo = """
+Vivi Ornitier so existe em FIN. O nome nao muda de idioma e as duas linhas de
+regra estao em ingles no campo pt do Arena.
+"""
+nome = "Vivi Ornitier"
+linha_de_tipo = "Criatura Lendária — Mago"
+texto = """
+{0}: Adicione X mana em qualquer combinação de {U} e/ou {R}, sendo X o poder de Vivi Ornitier. Ative somente durante seu turno e somente uma vez por turno.
+Toda vez que você conjurar uma mágica que não seja de criatura, coloque um marcador +1/+1 em Vivi Ornitier e ele causa 1 ponto de dano a cada oponente.
+"""
+
+["fin/10"]
+motivo = """
+So o nome de Cloud saiu traduzido no Arena; as duas linhas de regra estao em
+ingles no campo pt, e FIN nao tem impressao portuguesa.
+"""
+linha_de_tipo = "Criatura Lendária — Humano Soldado Mercenário"
+texto = """
+Quando Cloud entrar no campo de batalha, procure em seu grimório um card de Equipamento, revele-o, coloque-o em sua mão e depois embaralhe.
+Enquanto Cloud estiver equipado, se uma habilidade desencadeada de Cloud ou de um Equipamento anexado a ele for desencadeada, aquela habilidade desencadeia uma vez adicional.
+"""
+
+["fin/233"]
+motivo = """
+Tres palavras-chave de Lightning saem traduzidas no Arena, a linha do Stagger
+nao - e o texto e tudo ou nada. "Cambaleio" e traducao minha: a palavra de
+habilidade nao tem versao oficial em portugues.
+"""
+linha_de_tipo = "Criatura Lendária — Humano Soldado"
+texto = """
+Iniciativa, atropelar, vínculo com a vida
+Cambaleio — Toda vez que Lightning causar dano de combate a um jogador, até seu próximo turno, se uma fonte fosse causar dano àquele jogador ou a uma permanente que ele controla, ela causa o dobro daquele dano.
+"""
+historia = "\"Lightning. Brilha forte e logo se apaga. Não protege. Só destrói.\""
+
+["fin/115"]
+motivo = """
+Sephiroth so existe em FIN, que nunca saiu em portugues, e as quatro linhas de
+regra das duas faces estao em ingles no campo pt do Arena. "Supernova" e
+traducao minha: a palavra de habilidade nao tem versao oficial em portugues.
+"""
+
+[["fin/115".faces]]
+nome = "Sephiroth, SOLDIER Lendário"
+linha_de_tipo = "Criatura Lendária — Humano Avatar Soldado"
+texto = """
+Toda vez que Sephiroth entrar no campo de batalha ou atacar, você pode sacrificar outra criatura. Se fizer isso, compre um card.
+Toda vez que outra criatura morrer, o oponente alvo perde 1 ponto de vida e você ganha 1 ponto de vida. Se esta for a quarta vez que esta habilidade foi resolvida neste turno, transforme Sephiroth.
+"""
+
+[["fin/115".faces]]
+nome = "Sephiroth, Anjo de Uma Asa Só"
+linha_de_tipo = "Criatura Lendária — Anjo Pesadelo Avatar"
+texto = """
+Voar
+Supernova — Conforme esta criatura se transforma em Sephiroth, Anjo de Uma Asa Só, você recebe um emblema com "Toda vez que uma criatura morrer, o oponente alvo perde 1 ponto de vida e você ganha 1 ponto de vida."
+Toda vez que Sephiroth atacar, você pode sacrificar qualquer quantidade de outras criaturas. Se fizer isso, compre aquela quantidade de cards.
+"""

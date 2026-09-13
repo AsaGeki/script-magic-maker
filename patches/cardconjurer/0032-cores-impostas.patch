@@ -1,0 +1,18 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -864,6 +864,14 @@
+ 		colors = [...new Set(card.text.mana.text.toUpperCase().split('').filter(char => ['W', 'U', 'B', 'R', 'G'].includes(char)))];
+ 	}
+ 
++	/* script-magic-maker: cores-impostas */
++	// A excecao a mao (excecoes.toml) tem a ultima palavra sobre a cor. No
++	// terreno e a unica saida: a deducao acima le "Add ... any color" no texto,
++	// e o custo de mana nem chega a ser olhado.
++	if (card.coresImpostas) {
++		colors = card.coresImpostas.slice();
++	}
++
+ 	var group;
+ 	if (frame == 'M15Regular-1') {
+ 		autoM15Frame(colors, card.text.mana.text, card.text.type.text, card.text.pt.text);
