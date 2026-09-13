@@ -57,6 +57,11 @@ LAYOUTS_COM_VERSO = frozenset({"transform", "modal_dfc", "reversible_card", "dou
 
 _conexao: sqlite3.Connection | None = None
 _trava = asyncio.Lock()
+# A conexao e uma so, e cada consulta roda numa thread do to_thread: duas ao
+# mesmo tempo estouram "bad parameter or other API misuse" e deixam a conexao
+# inutil pelo resto do processo. Consulta em banco local e rapida, entao
+# serializar sai mais barato que abrir uma conexao por thread.
+_trava_da_consulta = asyncio.Lock()
 # Depois de uma falha, para de tentar pelo resto do processo: senao um deck
 # inteiro repete o mesmo download quebrado uma vez por carta.
 _falhou = False
@@ -161,7 +166,8 @@ async def _consultar(condicao: str, parametros: dict[str, Any], lang: str) -> li
     juncao = "join" if lang == "pt" else "left join"
     consulta = f"select {_COLUNAS} {_DE.format(juncao=juncao)} and {condicao} {_ORDEM}"
     parametros = {**parametros, "idioma": IDIOMA_PT}
-    return await asyncio.to_thread(lambda: banco.execute(consulta, parametros).fetchall())
+    async with _trava_da_consulta:
+        return await asyncio.to_thread(lambda: banco.execute(consulta, parametros).fetchall())
 
 
 # Onde procurar o nome, na ordem: o da carta em ingles (unico indexado), o de
