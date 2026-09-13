@@ -319,6 +319,25 @@ FRACAO_MINIMA_DA_REGIAO = 0.02
 FAIXA_QUE_DOMINA = 0.50
 
 
+def _erro_do_casamento(imagem: bytes, referencia: bytes) -> float | None:
+    """O quanto o art_crop deixa de casar dentro desta ilustracao, ou None.
+
+    O mesmo numero que o `_regiao_do_recorte` usa pra decidir se o casamento
+    convence, devolvido antes de escolher a arte.
+    """
+    try:
+        ilustracao = Image.open(BytesIO(imagem)).convert("L")
+        recorte = Image.open(BytesIO(referencia)).convert("L")
+    except (UnidentifiedImageError, OSError):
+        return None
+    erros = [
+        achado[0]
+        for achado in (_registrar(ilustracao, recorte), _registrar(recorte, ilustracao))
+        if achado is not None
+    ]
+    return min(erros) if erros else None
+
+
 def _regiao_do_recorte(ilustracao: Image.Image, recorte: Image.Image):
     """Onde o art_crop mora na ilustracao, ou None se o casamento nao convence."""
     em_cinza, recorte_em_cinza = ilustracao.convert("L"), recorte.convert("L")
@@ -636,8 +655,7 @@ async def _melhor_do_mtgpics(
                 )
                 continue
             semelhanca = na_regiao
-        # O sufixo "_N" marca outra resolucao do mesmo numero, nao outra
-        # ilustracao: o grupo e o numero sem ele.
+        # O sufixo "_N" marca outra versao do mesmo numero: o grupo ignora ele.
         grupo = (edicao.lower(), numero.lower().split("_")[0])
         candidatas.append(
             (
@@ -646,6 +664,7 @@ async def _melhor_do_mtgpics(
                 distancia,
                 _pixels_uteis(imagem, aspecto_da_janela),
                 imagem,
+                _erro_do_casamento(imagem, referencia),
             )
         )
 
@@ -666,7 +685,12 @@ async def _melhor_do_mtgpics(
         return (min(c[1] for c in do_grupo), min(c[2] for c in do_grupo))
 
     melhor = min({c[0] for c in candidatas}, key=_peso)
-    return max((c for c in candidatas if c[0] == melhor), key=lambda c: c[3])[4]
+    do_grupo = [c for c in candidatas if c[0] == melhor]
+    # No grupo cabe tambem o papel de parede da mesma arte, com a mesma paleta
+    # e outra composicao. Ganha aquela em que o art_crop cabe dentro; o tamanho
+    # so desempata.
+    casaram = [c for c in do_grupo if c[5] is not None and c[5] <= ERRO_MAXIMO_DO_CASAMENTO]
+    return max(casaram or do_grupo, key=lambda c: c[3])[4]
 
 
 def _url_da_arte(caminho: str) -> str:
