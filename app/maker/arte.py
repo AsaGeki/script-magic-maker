@@ -22,9 +22,10 @@ import logging
 import re
 from io import BytesIO
 from math import log
+from statistics import median
 
 import httpx
-from PIL import Image, ImageChops, ImageStat, UnidentifiedImageError
+from PIL import Image, ImageChops, ImageOps, ImageStat, UnidentifiedImageError
 
 from app import rede
 from app.cards.models import ScryfallCard
@@ -89,13 +90,16 @@ async def buscar(
         if usar_mtgpics and indice_da_face == 0:
             arte = await _melhor_do_mtgpics(client, carta, referencia, aspecto_da_janela)
             if arte is not None:
-                arte = _sem_carimbo(arte)
+                arte = _sem_carimbo(arte, referencia)
                 do_crop = await _janela_do_art_crop(client, carta, referencia, aspecto_da_janela)
                 arte = _no_enquadramento_impresso(
                     arte, referencia, (janela_de_arte, do_crop), carta
                 )
         if arte is None or not _vale_a_pena(arte, referencia, aspecto_da_janela, carta):
-            arte = referencia
+            # So o art_crop passa pelo corte de moldura impressa: a ilustracao
+            # do MTGPics nao tem tipografia de carta nenhuma, e o casamento com
+            # o art_crop acima e feito com ele inteiro.
+            arte = _sem_moldura_impressa(referencia, carta)
         return _data_url(arte)
 
 
@@ -177,6 +181,20 @@ COBERTURA_MAXIMA = 1.60
 # Acima desta sobreposicao o autoFitArt ja mostra o mesmo pedaco, e recortar so
 # jogaria pixel fora.
 SOBREPOSICAO_QUE_DISPENSA = 0.85
+
+# Quanto da ilustracao a regiao do art_crop precisa cobrir pra nao sobrar
+# sub-regiao nenhuma. Medido em 9 cartas de dois decks: onde o art_crop e a
+# ilustracao inteira a cobertura ficou entre 0,950 e 1,000, e onde ele e mesmo um
+# pedaco dela (Roiling Vortex, Chandra) ficou em 0,728 e 0,335.
+COBERTURA_QUE_DISPENSA = 0.85
+
+
+def _cobre_a_ilustracao(regiao) -> bool:
+    """Se a regiao do art_crop e a ilustracao inteira, fora o que passa da borda."""
+    largura = min(regiao[2], 1.0) - max(regiao[0], 0.0)
+    altura = min(regiao[3], 1.0) - max(regiao[1], 0.0)
+    return largura * altura >= COBERTURA_QUE_DISPENSA
+
 
 # A busca grossa varre a ilustracao inteira nesta largura; a fina repete numa
 # vizinhanca, com mais detalhe.
@@ -529,7 +547,10 @@ def _no_enquadramento_impresso(
         return arte
     aspecto_da_imagem = ilustracao.width / ilustracao.height
     regiao = _regiao_do_recorte(ilustracao, recorte)
-    if regiao is None:
+    # Sem casamento nao ha de onde cortar; com o art_crop cobrindo a ilustracao
+    # inteira nao ha sub-regiao pra onde cortar, e projetar assim mesmo fecha o
+    # corte em cima da cena - a saga perdia o aro e o laco da arte por 12%.
+    if regiao is None or _cobre_a_ilustracao(regiao):
         return arte
     if do_crop is not None:
         regiao = _pela_carta(regiao, do_crop, de_destino)
@@ -937,33 +958,131 @@ FAIXA_DO_CARIMBO = 0.12
 # O texto desbota nas bordas antes de sumir, entao o corte sobe um pouco.
 MARGEM_DO_CARIMBO = 0.01
 
+# Boa parte do acervo nao carimba a faixa inteira: escreve o credito ou o logo
+# num canto so, e ali a media da linha toda mal se mexe. O pico do terco da
+# ponta denuncia esse, e pede limiar proprio - o terco tem menos pintura pra
+# diluir o texto. Medido em 17 artes dos dois decks: arte limpa chegou a 1,99 e
+# o canto carimbado comecou em 3,04.
+TERCOS_DO_PERFIL = 3
+LIMIAR_DE_CARIMBO_NO_CANTO = 2.5
 
-def _perfil_de_bordas(imagem: Image.Image) -> list[float]:
-    """Bordas verticais somadas por linha, com a imagem normalizada na largura."""
+# Carimbo de duas linhas - o endereco do ilustrador em cima, o copyright embaixo
+# - so passa do limiar na linha mais grossa, e cortar ali deixa a de cima. Achado
+# o pico, o corte sobe enquanto o canto continuar em nivel de texto, pulando a
+# entrelinha.
+LIMIAR_DE_CONTINUACAO = 1.4
+ENTRELINHA_DO_CARIMBO = 0.02
+
+
+def _bordas_por_linha(imagem: Image.Image) -> list[list[int]]:
+    """As bordas verticais de cada linha, com a imagem normalizada na largura."""
     cinza = imagem.convert("L")
     cinza = cinza.resize((LARGURA_DO_PERFIL, int(LARGURA_DO_PERFIL * cinza.height / cinza.width)))
     bordas = ImageChops.difference(cinza, ImageChops.offset(cinza, 1, 0))
     dados = list(bordas.getdata())
     return [
-        sum(dados[y * LARGURA_DO_PERFIL : (y + 1) * LARGURA_DO_PERFIL]) / LARGURA_DO_PERFIL
-        for y in range(bordas.height)
+        dados[y * LARGURA_DO_PERFIL : (y + 1) * LARGURA_DO_PERFIL] for y in range(bordas.height)
     ]
+
+
+def _perfil_de_bordas(imagem: Image.Image) -> list[float]:
+    """Bordas verticais somadas por linha, com a imagem normalizada na largura."""
+    return [sum(linha) / LARGURA_DO_PERFIL for linha in _bordas_por_linha(imagem)]
+
+
+def _perfil_dos_cantos(linhas: list[list[int]]) -> list[float]:
+    """O maior dos dois tercos das pontas, linha por linha."""
+    terco = LARGURA_DO_PERFIL // TERCOS_DO_PERFIL
+    return [max(sum(linha[:terco]), sum(linha[-terco:])) / terco for linha in linhas]
+
+
+def _primeira_linha_do_carimbo(cantos: list[float], limite: float, pico: int, primeira: int) -> int:
+    """Subindo do pico, a linha onde o bloco de texto comeca."""
+    topo = pico
+    salto = max(1, round(len(cantos) * ENTRELINHA_DO_CARIMBO))
+    for linha in range(pico - 1, primeira - 1, -1):
+        if topo - linha > salto:
+            break
+        if cantos[linha] >= limite:
+            topo = linha
+    return topo
 
 
 def _inicio_do_carimbo(imagem: Image.Image) -> float | None:
     """Onde, na altura da imagem, o carimbo comeca. Fracao, ou None se nao ha."""
-    perfil = _perfil_de_bordas(imagem)
-    altura = len(perfil)
+    linhas = _bordas_por_linha(imagem)
+    altura = len(linhas)
+    perfil = [sum(linha) / LARGURA_DO_PERFIL for linha in linhas]
+    cantos = _perfil_dos_cantos(linhas)
     normal = sorted(perfil)[altura // 2] or 1.0
     primeira = int(altura * (1 - FAIXA_DO_CARIMBO))
     for linha in range(primeira, altura):
-        if perfil[linha] >= normal * LIMIAR_DE_CARIMBO:
-            return max(0.0, linha / altura - MARGEM_DO_CARIMBO)
+        carimbou = (
+            perfil[linha] >= normal * LIMIAR_DE_CARIMBO
+            or cantos[linha] >= normal * LIMIAR_DE_CARIMBO_NO_CANTO
+        )
+        if carimbou:
+            topo = _primeira_linha_do_carimbo(
+                cantos, normal * LIMIAR_DE_CONTINUACAO, linha, primeira
+            )
+            return max(0.0, topo / altura - MARGEM_DO_CARIMBO)
     return None
 
 
-def _sem_carimbo(imagem: bytes) -> bytes:
-    """A mesma arte sem a faixa de rodape, quando ela parece um carimbo."""
+# O perfil de borda acusa a faixa, e o art_crop confirma: carimbo e marca que a
+# grafica nao imprimiu, entao a faixa de baixo da ilustracao tem que sair
+# diferente da mesma faixa do recorte do Scryfall. As duas entram com o contraste
+# normalizado - sem isso o copyright escuro sobre pintura escura quase nao muda a
+# conta - e a diferenca vale pela pior celula da grade, porque carimbo pequeno se
+# dilui na media da faixa inteira.
+#
+# Medido em 11 ilustracoes do MTGPics: as 10 com carimbo de verdade ficaram entre
+# 46,4 e 147,3 na pior celula, e a rachadura do espelho da `Fabula do Quebrador
+# de Espelhos` - que o perfil acusa igual - ficou em 10,7.
+FAIXA_DA_CONFERENCIA = (96, 24)
+CELULAS_DA_CONFERENCIA = (8, 2)
+DIFERENCA_QUE_CONFIRMA_O_CARIMBO = 25.0
+
+
+def _faixa_normalizada(imagem: Image.Image, de: float) -> Image.Image:
+    """A faixa entre `de` e a base, em cinza, no tamanho da conferencia."""
+    cortada = imagem.convert("L").crop((0, int(imagem.height * de), imagem.width, imagem.height))
+    return ImageOps.autocontrast(cortada.resize(FAIXA_DA_CONFERENCIA))
+
+
+def _pior_celula(diferenca: Image.Image) -> float:
+    largura = FAIXA_DA_CONFERENCIA[0] // CELULAS_DA_CONFERENCIA[0]
+    altura = FAIXA_DA_CONFERENCIA[1] // CELULAS_DA_CONFERENCIA[1]
+    return max(
+        ImageStat.Stat(
+            diferenca.crop((x * largura, y * altura, (x + 1) * largura, (y + 1) * altura))
+        ).rms[0]
+        for x in range(CELULAS_DA_CONFERENCIA[0])
+        for y in range(CELULAS_DA_CONFERENCIA[1])
+    )
+
+
+def _o_art_crop_confirma_o_carimbo(
+    ilustracao: Image.Image, referencia: bytes, inicio: float
+) -> bool:
+    """Se a faixa acusada tem marca que a carta impressa nao mostra."""
+    try:
+        recorte = Image.open(BytesIO(referencia))
+        recorte.load()
+    except (UnidentifiedImageError, OSError):
+        return True
+    diferenca = ImageChops.difference(
+        _faixa_normalizada(ilustracao, inicio), _faixa_normalizada(recorte, inicio)
+    )
+    return _pior_celula(diferenca) >= DIFERENCA_QUE_CONFIRMA_O_CARIMBO
+
+
+def _sem_carimbo(imagem: bytes, referencia: bytes | None = None) -> bytes:
+    """A mesma arte sem a faixa de rodape, quando ela parece um carimbo.
+
+    `referencia` e o art_crop da mesma impressao; com ele o corte so acontece
+    depois de conferido (ver `_o_art_crop_confirma_o_carimbo`).
+    """
     try:
         aberta = Image.open(BytesIO(imagem))
         aberta.load()
@@ -973,7 +1092,106 @@ def _sem_carimbo(imagem: bytes) -> bytes:
     inicio = _inicio_do_carimbo(aberta)
     if inicio is None:
         return imagem
+    if referencia is not None and not _o_art_crop_confirma_o_carimbo(aberta, referencia, inicio):
+        logger.info(
+            "o rodape a partir de %.3f da altura aparece igual no art_crop, e pintura",
+            inicio,
+        )
+        return imagem
     return _cortar(aberta, (0.0, 0.0, 1.0, inicio))
+
+
+# Na carta sem borda a arte vai ate a aresta e o nome, a linha de tipo e os
+# filetes sao impressos sobre ela - dentro do que o Scryfall recorta como
+# art_crop. Com a moldura do gerador por cima, essa tipografia reaparece acima
+# da faixa de titulo. Duas medidas separam a moldura impressa da ilustracao:
+#
+# 1. a aresta: o degrau entre a moldura e a arte e uma reta que atravessa a
+#    imagem inteira, coisa que contorno de desenho quase nunca faz;
+# 2. a chapa: acima da aresta a grafica imprime sobre fundo liso, e a linha
+#    inteira fica na mesma cor.
+#
+# Medido em 38 art_crops sem borda (22 com moldura impressa, 16 limpos): nenhum
+# limpo passa nas duas ao mesmo tempo - a maior aresta limpa, 0,533, vem com
+# chapa 0,278, e a maior chapa limpa, 0,393, com aresta 0,316 -, e 15 dos 22 com
+# moldura passam. Os 7 que faltam saem como hoje, com a moldura visivel.
+ARESTA_DA_MOLDURA_IMPRESSA = 0.40
+CHAPA_DA_MOLDURA_IMPRESSA = 0.45
+
+# Degrau de cinza que conta como aresta, e distancia ate a cor do meio da linha
+# que ainda conta como a mesma chapa.
+DEGRAU_DA_ARESTA = 24
+TOM_DA_MESMA_CHAPA = 10
+
+# Onde procurar. As primeiras linhas sao a borda da propria imagem, que quase
+# toda carta tem; abaixo de um terco ja e ilustracao em qualquer carta medida.
+PRIMEIRA_LINHA_DA_MOLDURA = 0.012
+FAIXA_DA_MOLDURA_IMPRESSA = 0.32
+
+
+def _linhas_em_cinza(imagem: Image.Image) -> list[list[int]]:
+    """A imagem em cinza, normalizada na largura, linha a linha."""
+    cinza = imagem.convert("L")
+    cinza = cinza.resize((LARGURA_DO_PERFIL, int(LARGURA_DO_PERFIL * cinza.height / cinza.width)))
+    dados = list(cinza.getdata())
+    return [dados[y * LARGURA_DO_PERFIL : (y + 1) * LARGURA_DO_PERFIL] for y in range(cinza.height)]
+
+
+def _chapa(linha: list[int]) -> float:
+    """Quanto da linha fica na mesma cor do meio dela."""
+    meio = median(linha)
+    return sum(1 for valor in linha if abs(valor - meio) <= TOM_DA_MESMA_CHAPA) / len(linha)
+
+
+def _fim_da_moldura_impressa(imagem: Image.Image) -> float | None:
+    """Onde, na altura, a moldura impressa acaba. Fracao, ou None se nao ha.
+
+    Vale a aresta mais funda que passa nas duas medidas: a moldura pode ter
+    nome, linha de tipo e filete, e cortar na primeira deixaria o resto.
+    """
+    linhas = _linhas_em_cinza(imagem)
+    altura = len(linhas)
+    chapas = [_chapa(linha) for linha in linhas]
+    fim = None
+    primeira = max(2, int(altura * PRIMEIRA_LINHA_DA_MOLDURA))
+    for y in range(primeira, int(altura * FAIXA_DA_MOLDURA_IMPRESSA)):
+        aresta = sum(
+            1
+            for anterior, atual in zip(linhas[y - 1], linhas[y], strict=True)
+            if abs(atual - anterior) >= DEGRAU_DA_ARESTA
+        ) / len(linhas[y])
+        if aresta < ARESTA_DA_MOLDURA_IMPRESSA:
+            continue
+        if sum(chapas[:y]) / y < CHAPA_DA_MOLDURA_IMPRESSA:
+            continue
+        fim = y
+    return fim / altura if fim else None
+
+
+def _sem_moldura_impressa(imagem: bytes, carta: ScryfallCard) -> bytes:
+    """O art_crop sem a moldura impressa que ele as vezes traz no topo.
+
+    So impressao sem borda ou de arte cheia passa por aqui: na carta com borda a
+    janela de arte e cercada pela moldura e o recorte nao pega tipografia
+    nenhuma.
+    """
+    if carta.border_color != "borderless" and not carta.full_art:
+        return imagem
+    try:
+        aberta = Image.open(BytesIO(imagem))
+        aberta.load()
+    except (UnidentifiedImageError, OSError):
+        return imagem
+
+    fim = _fim_da_moldura_impressa(aberta)
+    if fim is None:
+        return imagem
+    logger.info(
+        "%s: o art_crop traz moldura impressa ate %.3f da altura, cortando ali",
+        carta.nome_exibido,
+        fim,
+    )
+    return _cortar(aberta, (0.0, fim, 1.0, 1.0))
 
 
 def _pixels(imagem: bytes) -> int:
