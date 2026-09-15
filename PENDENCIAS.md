@@ -51,13 +51,33 @@ embaixo. O `png` da carta (745x1040) tem a cena que falta, mas com o texto
 impresso por cima, e a caixa de regras da moldura sem borda é transparente (o
 texto sai em branco direto sobre a arte), então o texto do `png` apareceria.
 
-### O art_crop pode trazer moldura impressa dentro
+### Moldura impressa dentro do art_crop que o corte não pega
 
-`Aves do Paraíso (FIC 483)` é sem borda e imprime o nome dentro do que seria a
-janela de arte comum: o `art_crop` dela vem com a faixa "Birds of Paradise". Com
-o `autoFitArt` essa faixa cai em y 0,028 da carta gerada, logo acima da barra de
-título que o gerador desenha — duas barras. Não há campo que diga que o recorte
-pegou moldura.
+O `art_crop` de carta sem borda pode trazer o nome, a linha de tipo e os filetes
+impressos sobre a arte — `Aves do Paraíso (FIC 483)` vem com a faixa "Birds of
+Paradise", e com o `autoFitArt` ela caía em y 0,028 da carta gerada, logo acima
+da barra de título do gerador. Quem corta isso agora é `_sem_moldura_impressa`,
+por duas medidas: a aresta reta que atravessa a imagem e a chapa lisa acima
+dela.
+
+O que sobra é o que passa por baixo de uma das duas. Medindo 38 `art_crop` sem
+borda, 15 dos 22 com moldura impressa são cortados e nenhum dos 16 limpos é
+tocado. Os 7 que escapam e o quanto cada um erra:
+
+| Carta | Aresta | Chapa |
+|---|---|---|
+| `Land Tax (SLZ 247)` | 0,576 | 0,401 |
+| `Birds of Paradise (SLZ 313)` | 0,910 | 0,305 |
+| `Price of Progress (SLZ 307)` | 0,469 | 0,371 |
+| `Smaug, Wicked Worm (HOB 245)` | 0,406 | 0,411 |
+| `Chromatic Lantern (SLZ 217)` | 0,311 | 0,798 |
+| `Dueling Grounds (SLZ 331)` | 0,387 | 0,831 |
+| `Yargle, Glutton of Urborg (SLZ 295)` | 0,332 | 0,762 |
+
+Baixar qualquer um dos dois limiares pega parte deles e começa a cortar arte: o
+`art_crop` limpo com a maior aresta (`Ritual Sombrio, STA 26`) dá 0,533, e o de
+maior chapa (`Aragorn and Arwen, Wed`, HOC 28) dá 0,393. A saída seria uma
+terceira medida, não um limiar mais frouxo.
 
 ### Arte de material de origem sobre fundo chapado
 
@@ -231,6 +251,52 @@ Algumas impressões trazem o selo dentro da janela de arte. Medindo a razão
 entre o canto e a média, as com selo deram 1,45 e 1,04 e as sem deram 1,42,
 2,04, 1,19 e 1,41: as faixas se cruzam, e um detector com esse sinal cortaria
 arte limpa.
+
+### Logo no topo do papel de parede do MTGPics
+
+O `_sem_carimbo` corta o rodapé, e é lá que mora o crédito. O bloco de logo
+("MAGIC THE GATHERING | FINAL FANTASY") fica no **topo**, e a mesma medida não
+separa lá: no bloco de bordas das primeiras 12% de altura, o pico do terço da
+ponta deu 5,42 em `Vivi Ornitier (FIN 248)` e 6,00 em `Chocobo Viajante (FIN
+406)`, os dois carimbados, contra 2,78 na arte limpa de `Wrenn e Seis` e 2,60
+no símbolo de planeswalker da art series da MH2 — que é carimbo. Os dois grupos
+se cruzam, e cortar 20% do topo é o tamanho que o bloco pede.
+
+Na `Vivi Ornitier` o alinhamento pelo `art_crop` já tira quase tudo (a região
+casa em x 0,116–0,850 e y 0,149–0,928, e o bloco vai até x 0,97 e y 0,20):
+sobra a fatia "FINA" no canto. Na `Chocobo Viajante` o logo cai atrás da barra
+de título e não aparece.
+
+### Símbolo de planeswalker na arte de art series
+
+`Floresta Tropical Nebulosa (MH2 250)`: o MTGPics tem duas versões da mesma
+pintura — `zen/220` limpa em 640x468 e `zen/220_1` em 4000x3000, que é o scan
+da art series, com o símbolo de planeswalker num canto de cima, o símbolo da
+coleção no outro e o crédito no rodapé. O rodapé sai no corte; os dois de cima
+ficam.
+
+Hoje ganha a maior, e é a carimbada. O casamento com o `art_crop` prefere a
+limpa (erro 15,75 contra 19,60), mas ela tem 640x468 — praticamente o tamanho
+do próprio `art_crop` (626x457). É trocar dois símbolos pequenos por 4000px de
+largura.
+
+### Lembrete da palavra-chave nova quando a fonte é o Arena
+
+`Limite Especial de Tifa (FIN 207)` imprime "Níveis (Escolha um custo
+adicional.)"; a nossa sai só "Níveis". O Arena guarda a habilidade sem lembrete
+nenhum, nos dois idiomas — `Tiered \n•Somersault — ...` no `en` e `Níveis
+\n•Chute Mortal — ...` no `pt` — e FIN não tem impressão em português de onde
+emprestar. O texto da carta é tudo ou nada: costurar o lembrete do inglês no
+meio do português misturaria as duas línguas.
+
+### História em inglês quando a irmã em português traz outra
+
+`Bravura da Antiga Krosa (2X2 153)`: 2X2 não tem impressão em português
+(`/pt` devolve 400 nas três cartas do deck), e as duas irmãs em português — TSP
+204 e TSR 217 — imprimem outra história, não a tradução da que a 2X2 traz. A
+comparação de texto recusa o empréstimo, e a história sai em inglês. É o
+comportamento certo: a alternativa seria imprimir uma frase que não é a da
+carta.
 
 ## Decisões que valem revisar
 
