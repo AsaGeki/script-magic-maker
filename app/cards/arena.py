@@ -33,6 +33,10 @@ TIMEOUT = 60.0
 # chave so: "{o1oB}" sao dois simbolos, "{oWoUoBoRoG}" sao cinco.
 _SIMBOLO_ARENA = re.compile(r"\{o([^}]*)\}")
 
+# O Arena cola o marcador de opção na palavra ("•Chute Mortal"); o Scryfall
+# separa, e é do espaço que o gerador tira o recuo da linha de opção.
+_OPCAO_COLADA = re.compile(r"•(?=\S)")
+
 _bancos: dict[str, dict] = {}
 # Os indices sao montados na primeira busca e guardados aqui dentro: o dict e
 # mutado, nunca trocado, entao nenhuma funcao precisa de `global`.
@@ -152,6 +156,7 @@ def _abrir_simbolos(achado: re.Match[str]) -> str:
 def _transformar_texto(bruto: str, nome_traduzido: str) -> str:
     """Do jeito que o Arena guarda pro jeito que o Scryfall guarda."""
     texto = _SIMBOLO_ARENA.sub(_abrir_simbolos, bruto)
+    texto = _OPCAO_COLADA.sub("• ", texto)
     return texto.replace("CARDNAME", nome_traduzido)
 
 

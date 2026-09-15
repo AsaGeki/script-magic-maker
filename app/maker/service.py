@@ -22,7 +22,7 @@ from playwright.async_api import Browser, Page, Route, async_playwright
 from app import excecoes
 from app.cards.enums import LAYOUTS_DE_DUAS_FACES, Layout, Rarity
 from app.cards.models import FaceBase, ScryfallCard
-from app.cards.palavras_chave import palavras_de_habilidade
+from app.cards.palavras_chave import palavras_chave, palavras_de_habilidade
 from app.cards.service import e_terreno_basico
 from app.config import (
     CARDCONJURER_URL,
@@ -1239,6 +1239,7 @@ async def _preencher(
                 "textoTraduzido": _texto_traduzido(carta, face),
                 "flavorTraduzido": _flavor_traduzido(carta, face),
                 "palavrasDeHabilidade": list(await palavras_de_habilidade()),
+                "palavrasChave": list(await palavras_chave()),
                 "arenaId": carta.id if usar_arena else None,
                 "arenaTexto": carta.arena.texto if usar_arena else None,
                 "arenaFlavor": carta.arena.flavor_text if usar_arena else None,

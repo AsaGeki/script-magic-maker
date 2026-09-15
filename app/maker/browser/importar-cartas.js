@@ -15,10 +15,21 @@
 // indice 0 - a impressao mais recente do nome, nao a pedida. Buscar o id
 // direto (fetchScryfallCardByID) quando ele faltar cobre esse caso.
 (args) => {
-    const { nome, idAlvo, indiceDaFaceAlvo, tipoDeReserva, textoDeReserva, tipoTraduzido, textoTraduzido, flavorTraduzido, arenaId, arenaTexto, arenaFlavor, palavrasDeHabilidade } = args;
-    // Lista do MTGJSON (ver app.cards.palavras_chave): diz quais palavras antes
-    // do travessao saem em italico. Sem ela o changeCardIndex usa a embutida.
+    const { nome, idAlvo, indiceDaFaceAlvo, tipoDeReserva, textoDeReserva, tipoTraduzido, textoTraduzido, flavorTraduzido, arenaId, arenaTexto, arenaFlavor, palavrasDeHabilidade, palavrasChave } = args;
+    // Listas do MTGJSON (ver app.cards.palavras_chave): dizem quais palavras
+    // antes do travessao saem em italico. Sem elas o changeCardIndex usa a
+    // lista de excecoes embutida.
     window.palavrasDeHabilidade = palavrasDeHabilidade || [];
+    window.palavrasChave = palavrasChave || [];
+
+    // O changeCardIndex compara a linha traduzida com a equivalente em ingles
+    // pra saber se a palavra antes do travessao e italica. O
+    // processScryfallCard so guarda o ingles quando a impressao e traduzida;
+    // numa impressao inglesa com texto emprestado de fora (Arena, excecoes.toml)
+    // o ingles e o proprio oracle_text, e sem guardar ele some na troca.
+    const guardarOIngles = (c) => {
+        if (!c.textoEmIngles) c.textoEmIngles = c.oracle_text || '';
+    };
 
     // Carta de duas faces entra na lista como duas entradas com o mesmo id (ver
     // face-identificada-no-import): so o numero da face separa uma da outra.
@@ -37,13 +48,19 @@
             // historia emprestados de uma irma em portugues.
             if (eOAlvo(c)) {
                 if (tipoTraduzido) c.type_line = tipoTraduzido;
-                if (textoTraduzido !== null) c.oracle_text = textoTraduzido;
+                if (textoTraduzido !== null) {
+                    guardarOIngles(c);
+                    c.oracle_text = textoTraduzido;
+                }
                 if (flavorTraduzido) c.flavor_text = flavorTraduzido;
             }
             // O nome fica de fora: importCard() usa c.name pra buscar a arte, e
             // traduzido a busca volta vazia (ver _aplicar_nome_traduzido).
             if (arenaId && c.id === arenaId) {
-                if (arenaTexto) c.oracle_text = arenaTexto;
+                if (arenaTexto) {
+                    guardarOIngles(c);
+                    c.oracle_text = arenaTexto;
+                }
                 if (arenaFlavor) c.flavor_text = arenaFlavor;
             }
         });

@@ -1,0 +1,56 @@
+diff --git a/js/creator-23.js b/js/creator-23.js
+index 3d9d877..4ae0547 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -6337,7 +6337,11 @@ function changeCardIndex() {
+ 	// mesma posicao, mesmo papel - so o nome mudou na traducao.
+ 	const linhasEmIngles = (cardToImport.textoEmIngles || '').split('\n');
+ 	var rulesText = (cardToImport.oracle_text || '').split('\n').map(function(linha, indice){
+-	    return linha.replace(/(?:\((?:.*?)\)|[^"\n]+(?= — ))/g, function(a){
++	    /* script-magic-maker: palavra-de-habilidade-no-comeco-da-linha */
++	    // A palavra de habilidade abre a linha, e o quantificador guloso ia ate
++	    // o ultimo travessao: na linha de opcao do Escalonado ("• Somersault —
++	    // {0} — ...") ele engolia o custo junto com o nome.
++	    return linha.replace(/\((?:.*?)\)|^[^"\n]+?(?= — )/g, function(a){
+ 	        if (italicExemptions.includes(a) || (cardToImport.keywords && cardToImport.keywords.indexOf('Spree') != -1 && a.startsWith('+'))) {return a;}
+ 	        const equivalenteEmIngles = (linhasEmIngles[indice] || '').split(' — ')[0];
+ 	        if (!a.startsWith('(') && italicExemptions.includes(equivalenteEmIngles)) {return a;}
+@@ -6345,11 +6349,24 @@ function changeCardIndex() {
+ 	        // Quando o chamador manda as palavras de habilidade do MTGJSON, ela
+ 	        // e a autoridade: so entra em italico quem esta la. Palavra-chave
+ 	        // com travessao (Evoke, Boast, Cycling) fica redonda, como na carta.
++	        /* script-magic-maker: italico-pela-keyword-da-impressao */
++	        // O abilityWords do MTGJSON demora a incorporar colecao nova - FIN saiu
++	        // com Stagger e Super Nova italicas na carta impressa e nenhuma das
++	        // duas esta la. O keywords da propria impressao tem as duas, e nunca
++	        // tem cabecalho de modal ("Choose one"), que sai redondo: entao italico
++	        // tambem o que a impressao lista como keyword sem ser palavra-chave.
+ 	        const palavrasDeHabilidade = window.palavrasDeHabilidade;
+ 	        if (!a.startsWith('(') && Array.isArray(palavrasDeHabilidade) && palavrasDeHabilidade.length) {
+-	            const referencia = (linhasEmIngles.length ? equivalenteEmIngles : a).trim();
+-	            if (!palavrasDeHabilidade.includes(referencia)) {return a;}
++	            // Sem texto em ingles guardado, a propria linha e a referencia; o
++	            // marcador de opcao nao faz parte do nome da habilidade.
++	            const referencia = (equivalenteEmIngles || a).trim().replace(/^• /, '');
++	            const daImpressao = cardToImport.keywords || [];
++	            const palavrasChave = window.palavrasChave || [];
++	            const eDaImpressao = daImpressao.includes(referencia) && !palavrasChave.includes(referencia);
++	            if (!palavrasDeHabilidade.includes(referencia) && !eDaImpressao) {return a;}
+ 	        }
++	        // O marcador de opcao fica fora do italico, como na carta impressa.
++	        if (a.startsWith('• ')) {return '• {i}' + a.slice(2) + '{/i}';}
+ 	        return '{i}' + a + '{/i}';
+ 	    });
+ 	}).join('\n');
+@@ -6970,6 +6987,11 @@ function processScryfallCard(card, responseCards) {
+ 			face.rarity = card.rarity;
+ 			face.collector_number = card.collector_number;
+ 			face.lang = card.lang;
++			/* script-magic-maker: keywords-na-face */
++			// O keywords fica so na carta de cima, e e ele que diz se a palavra
++			// antes do travessao e palavra de habilidade. Sem copiar, o verso
++			// perde o italico (Super Nova, no verso do Sephiroth).
++			face.keywords = card.keywords;
+ 			if (card.lang != 'en') {
+ 				/* script-magic-maker: guarda-texto-em-ingles */
+ 				face.textoEmIngles = face.oracle_text;
