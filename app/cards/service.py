@@ -321,8 +321,12 @@ def _irma_com_o_mesmo_texto(carta: ScryfallCard, irmas: list[ScryfallCard]) -> S
     paragrafos do ingles daqui e quem foi impressa do mesmo jeito. Sem
     nenhuma assim, vale a mais recente.
     """
-    paragrafos = _paragrafos(carta.oracle_text)
-    mesmo_formato = [irma for irma in irmas if _paragrafos(irma.printed_text) == paragrafos]
+    paragrafos = _paragrafos(_onde_o_texto_mora(carta)[0].oracle_text)
+    mesmo_formato = [
+        irma
+        for irma in irmas
+        if _paragrafos(_onde_o_texto_mora(irma)[0].printed_text) == paragrafos
+    ]
     return max(mesmo_formato or irmas, key=lambda irma: irma.released_at or date.min)
 
 
@@ -343,31 +347,56 @@ async def completar_traducao_pos_corte(carta: ScryfallCard) -> None:
     if carta.lang != "en" or carta.printed_name or e_terreno_basico(carta):
         return
 
+    # Carta de duas faces guarda nome, tipo e regras dentro de card_faces e
+    # deixa os campos da carta vazios: emprestar so pro nivel de cima nao chega
+    # no desenho, que le a face.
+    faces = _onde_o_texto_mora(carta)
+    frente = faces[0]
+
     # As irmas em portugues servem ao nome, ao texto e a historia: uma consulta
     # so, reaproveitada pelos tres.
     async with _cliente() as client:
         irmas = await _impressoes_por_nome(client, carta.name, "pt")
 
-        com_traducao = [irma for irma in irmas if irma.printed_name]
+        com_traducao = [irma for irma in irmas if _onde_o_texto_mora(irma)[0].printed_name]
         if com_traducao:
             # Nome e texto saem da MESMA irma: o texto de regras repete o nome
             # da carta, e misturar duas impressoes deixa os dois discordando.
             escolhida = _irma_com_o_mesmo_texto(carta, com_traducao)
-            carta.printed_name = escolhida.printed_name
-            carta.printed_text = escolhida.printed_text
+            for indice, face in enumerate(faces):
+                da_irma = _face_equivalente(escolhida, indice)
+                if da_irma is None:
+                    continue
+                face.printed_name = da_irma.printed_name
+                face.printed_text = da_irma.printed_text
+                # A irma e a mesma carta: a linha de tipo dela ja e esta. So
+                # quando o ingles das duas difere e que a busca por equivalente
+                # abaixo ainda faz falta.
+                if da_irma.type_line == face.type_line:
+                    face.printed_type_line = da_irma.printed_type_line
 
-        if carta.arena and (not carta.printed_name or not carta.printed_text):
-            carta.printed_name = carta.printed_name or carta.arena.nome
-            carta.printed_text = carta.printed_text or carta.arena.texto
+        # O Arena traduz a carta, nao a face: so a frente aceita o texto dele.
+        if carta.arena and (not frente.printed_name or not frente.printed_text):
+            frente.printed_name = frente.printed_name or carta.arena.nome
+            frente.printed_text = frente.printed_text or carta.arena.texto
 
-        if not carta.printed_name:
+        if not frente.printed_name:
             return
-        if not carta.printed_type_line:
-            carta.printed_type_line = await _linha_de_tipo_equivalente(client, carta.type_line)
-        if carta.flavor_text:
-            equivalente = await _flavor_equivalente(client, carta, irmas)
-            do_arena = carta.arena.flavor_text if carta.arena else None
-            carta.flavor_text = equivalente or do_arena or carta.flavor_text
+        for indice, face in enumerate(faces):
+            if not face.printed_name:
+                continue
+            if not face.printed_type_line:
+                face.printed_type_line = await _linha_de_tipo_equivalente(client, face.type_line)
+            if face.flavor_text:
+                equivalente = await _flavor_equivalente(client, carta, irmas, indice)
+                do_arena = carta.arena.flavor_text if carta.arena and indice == 0 else None
+                face.flavor_text = equivalente or do_arena or face.flavor_text
+
+    # O Scryfall deixa o nome da carta de duas faces vazio e guarda um por face;
+    # o nome da carta inteira e os dois com a mesma barra que separa o ingles,
+    # e e por ele que a tabela, o aviso e o nome do arquivo passam.
+    if len(faces) > 1 and all(face.printed_name for face in faces):
+        carta.printed_name = " // ".join(face.printed_name or "" for face in faces)
 
     # Depois do emprestimo, que sobrescreve o que veio antes.
     excecoes.aplicar_no_texto(carta)
@@ -386,6 +415,21 @@ def _onde_o_texto_mora(carta: ScryfallCard) -> list[FaceBase]:
     if carta.layout in LAYOUTS_DE_DUAS_FACES and carta.card_faces:
         return list(carta.card_faces)
     return [carta]
+
+
+def _face_equivalente(carta: ScryfallCard, indice: int) -> FaceBase | None:
+    """A face de mesma ordem nesta impressao, ou None quando ela nao tem tantas.
+
+    A irma de onde o portugues vem pode ter outro layout - carta que virou de
+    duas faces numa reimpressao - e ai a face de la nao existe.
+    """
+    faces = _onde_o_texto_mora(carta)
+    return faces[indice] if indice < len(faces) else None
+
+
+def _flavor_da_face(carta: ScryfallCard, indice: int) -> str | None:
+    face = _face_equivalente(carta, indice)
+    return face.flavor_text if face else None
 
 
 def _avisar_traducao_incompleta(carta: ScryfallCard) -> None:
@@ -410,7 +454,10 @@ def _avisar_traducao_incompleta(carta: ScryfallCard) -> None:
 
 
 async def _flavor_equivalente(
-    client: httpx.AsyncClient, carta: ScryfallCard, em_portugues: list[ScryfallCard]
+    client: httpx.AsyncClient,
+    carta: ScryfallCard,
+    em_portugues: list[ScryfallCard],
+    indice: int = 0,
 ) -> str | None:
     """A historia em portugues da irma que conta a MESMA historia em ingles.
 
@@ -420,14 +467,15 @@ async def _flavor_equivalente(
     irma em portugues o campo ja veio traduzido. Sem irma que bata, devolve
     None e o chamador fica com o ingles.
     """
-    candidatas = [irma for irma in em_portugues if irma.flavor_text]
+    historia = _flavor_da_face(carta, indice)
+    candidatas = [irma for irma in em_portugues if _flavor_da_face(irma, indice)]
     if not candidatas:
         return None
     em_ingles = await _impressoes_por_nome(client, carta.name, "en")
     mesma_historia = {
         (irma.set.lower(), irma.collector_number.lower())
         for irma in em_ingles
-        if irma.flavor_text == carta.flavor_text
+        if _flavor_da_face(irma, indice) == historia
     }
     casadas = [
         irma
@@ -440,7 +488,8 @@ async def _flavor_equivalente(
             carta.nome_exibido,
         )
         return None
-    return max(casadas, key=lambda irma: irma.released_at or date.min).flavor_text
+    escolhida = max(casadas, key=lambda irma: irma.released_at or date.min)
+    return _flavor_da_face(escolhida, indice)
 
 
 async def find_card_by_id(card_id: str) -> ScryfallCard:
