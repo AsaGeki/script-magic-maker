@@ -1,0 +1,129 @@
+diff --git a/creator/index.html b/creator/index.html
+index 577fa62..2012700 100644
+--- a/creator/index.html
++++ b/creator/index.html
+@@ -729,6 +729,8 @@
+ 							<option value="TextlessBasicsBorderlessTopo">Fullart Basic Land (Borderless, top name)</option>
+ 							<!-- script-magic-maker: moldura-de-saga -->
+ 							<option value="SagaRegular">Saga</option>
++							<!-- script-magic-maker: moldura-de-saga-de-duas-faces -->
++							<option value="SagaDFC">Saga (Transform Front)</option>
+ 							<!-- script-magic-maker: moldura-de-caso -->
+ 							<option value="Case">Case</option>
+ 							<!-- script-magic-maker: moldura-de-classe -->
+diff --git a/js/creator-23.js b/js/creator-23.js
+index 4ae0547..63527b0 100644
+--- a/js/creator-23.js
++++ b/js/creator-23.js
+@@ -934,6 +934,12 @@ function autoFrame() {
+ 		group = 'Saga-1';
+ 		// Saga nunca tem poder/resistencia, e o campo nem existe no pacote dela.
+ 		autoSagaRegularFrame(colors, card.text.mana.text, card.text.type.text, '');
++	/* script-magic-maker: moldura-de-saga-de-duas-faces */
++	} else if (frame == 'SagaDFC') {
++		group = 'DFC';
++		// A frente da saga que transforma nao tem poder/resistencia: o do verso
++		// entra depois, no campo backPT do pacote.
++		autoSagaDFCFrame(colors, card.text.mana.text, card.text.type.text, '');
+ 	/* script-magic-maker: moldura-de-caso */
+ 	} else if (frame == 'Case') {
+ 		group = 'Saga-1';
+@@ -2128,6 +2134,98 @@ async function autoSagaRegularFrame(colors, mana_cost, type_line, power) {
+ 	await card.frames.forEach(item => addFrame([], item));
+ 	card.frames.reverse();
+ }
++/* script-magic-maker: moldura-de-saga-de-duas-faces */
++// A saga que transforma reparte a carta como a saga comum - capitulos a
++// esquerda, arte alta a direita - e ainda leva o simbolo da transformada no
++// nome e o poder/resistencia do verso acima da linha de tipo. O pacote SagaDFC
++// tem as duas coisas, e o autoFrame nao chegava nele: a carta caia na
++// M15TransformFront, que poe os capitulos como texto corrido.
++var MASCARAS_DA_SAGA_DFC = {
++	'Pinline': '/img/frames/saga/dfc/pinline.svg',
++	'Title': '/img/frames/m15/transform/regular/maskTitle.png',
++	'Type': '/img/frames/saga/sagaMaskType.png',
++	'Frame': '/img/frames/saga/dfc/frame.svg',
++	'Banner': '/img/frames/saga/dfc/banner.svg',
++	'Banner (Right)': '/img/frames/saga/dfc/bannerRight.svg',
++	'Text': '/img/frames/saga/dfc/rules.svg',
++	'Text (Right)': '/img/frames/saga/sagaMaskTextRight.png',
++	'Border': '/img/frames/saga/sagaMaskBorder.png'
++};
++// O pacote tem colorida, multicolorida e de terreno; nao tem a de artefato que
++// a saga comum tem, entao incolor e artefato caem na multicolorida.
++var CORES_DA_SAGA_DFC = ['W', 'U', 'B', 'R', 'G', 'M', 'L'];
++function makeSagaDFCFrameByLetter(letter, mask, maskToRightHalf) {
++	var frameNames = {'W': 'White', 'U': 'Blue', 'B': 'Black', 'R': 'Red', 'G': 'Green', 'M': 'Multicolored', 'L': 'Land'};
++	letter = letraDaDuplaFace(letter, true);
++	if (!CORES_DA_SAGA_DFC.includes(letter)) {
++		letter = 'M';
++	}
++	var nome = maskToRightHalf && MASCARAS_DA_SAGA_DFC[mask + ' (Right)'] ? mask + ' (Right)' : mask;
++	var frame = {
++		name: frameNames[letter] + ' Frame',
++		src: '/img/frames/saga/dfc/' + letter.toLowerCase() + '.png',
++		masks: [{src: MASCARAS_DA_SAGA_DFC[nome], name: nome}]
++	};
++	if (maskToRightHalf && nome == mask) {
++		frame.masks.push({src: '/img/frames/maskRightHalf.png', name: 'Right Half'});
++	}
++	return frame;
++}
++async function autoSagaDFCFrame(colors, mana_cost, type_line, power) {
++	card.frames = [];
++	document.querySelector('#frame-list').innerHTML = null;
++
++	// resetOthers desligado pra nao refazer o rodape: quem escolhe o estilo dele
++	// e quem chamou, antes desta moldura.
++	await resetCardIrregularities({resetOthers: false});
++	card.version = 'sagaDFC';
++	card.onload = '/js/frames/versionSaga.js';
++	loadScript('/js/frames/versionSaga.js');
++	card.artBounds = {x: 0.5, y: 0.1124, width: 0.4247, height: 0.7253};
++	autoFitArt();
++	card.setSymbolBounds = {x: 0.9227, y: 0.8739, width: 0.12, height: 0.0381, vertical: 'center', horizontal: 'right'};
++	resetSetSymbol();
++	card.watermarkBounds = {x: 0.3027, y: 0.4748, width: 0.3547, height: 0.6767};
++	resetWatermark();
++	loadTextOptions({
++		mana: {name: 'Mana Cost', text: '', y: 0.0613, width: 0.9292, height: 71/2100, oneLine: true, size: 71/1638, align: 'right', shadowX: -0.001, shadowY: 0.0029, manaCost: true, manaSpacing: 0},
++		title: {name: 'Title', text: '', x: 0.16, y: 0.0522, width: 0.7547, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0381},
++		type: {name: 'Type', text: '', x: 0.0854, y: 0.8481, width: 0.8292, height: 0.0543, oneLine: true, font: 'belerenb', size: 0.0324},
++		ability0: {name: 'Ability 1', text: '', x: 0.1334, y: 0.2896, width: 0.35, height: 0.1786, size: 0.0305},
++		ability1: {name: 'Ability 2', text: '', x: 0.1334, y: 0, width: 0.35, height: 0.1786, size: 0.0305},
++		ability2: {name: 'Ability 3', text: '', x: 0.1334, y: 0, width: 0.35, height: 0.1786, size: 0.0305},
++		ability3: {name: 'Ability 4', text: '', x: 0.1334, y: 0, width: 0.35, height: 0, size: 0.0305},
++		backPT: {name: 'Reverse PT', text: '', x: 0.08, y: 0.7929, width: 0.35, height: 0.0362, size: 0.0291, oneLine: true, color: '#666', font: 'belerenbsc'},
++		// Mesmo vao da saga comum, mesmo tamanho: 0.03 do pacote nao cabe
++		// "marcador de conhecimento." numa linha.
++		reminder: {name: 'Reminder Text', text: '', x: 0.0867, y: 0.1129, width: 0.404, height: 0.1772, size: 0.0258, shadowColor: 'white'}
++	});
++
++	var properties = cardFrameProperties(colors, mana_cost, type_line, power);
++	var frames = [SIMBOLO_DA_TRANSFORMADA];
++	if (properties.pinlineRight) {
++		frames.push(makeSagaDFCFrameByLetter(properties.pinlineRight, 'Pinline', true));
++	}
++	frames.push(makeSagaDFCFrameByLetter(properties.pinline, 'Pinline', false));
++	frames.push(makeSagaDFCFrameByLetter(properties.typeTitle, 'Type', false));
++	frames.push(makeSagaDFCFrameByLetter(properties.typeTitle, 'Title', false));
++	if (properties.rulesRight) {
++		frames.push(makeSagaDFCFrameByLetter(properties.rulesRight, 'Banner', true));
++		frames.push(makeSagaDFCFrameByLetter(properties.rulesRight, 'Text', true));
++	}
++	frames.push(makeSagaDFCFrameByLetter(properties.rules, 'Banner', false));
++	frames.push(makeSagaDFCFrameByLetter(properties.rules, 'Text', false));
++	if (properties.frameRight) {
++		frames.push(makeSagaDFCFrameByLetter(properties.frameRight, 'Frame', true));
++	}
++	frames.push(makeSagaDFCFrameByLetter(properties.frame, 'Frame', false));
++	frames.push(makeSagaDFCFrameByLetter(properties.frame, 'Border', false));
++
++	card.frames = frames;
++	card.frames.reverse();
++	await card.frames.forEach(item => addFrame([], item));
++	card.frames.reverse();
++}
+ async function autoUBFrame(colors, mana_cost, type_line, power) {
+ 	var frames = card.frames.filter(frame => frame.name.includes('Extension') || frame.name.includes('Gray Holo Stamp') || frame.name.includes('Gold Holo Stamp'));
+ 

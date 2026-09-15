@@ -58,6 +58,9 @@ MOLDURAS = {
     "Terreno basico sem borda": "TextlessBasicsBorderless",
     "Terreno basico sem borda com nome no topo": "TextlessBasicsBorderlessTopo",
     "Saga": "SagaRegular",
+    "Saga transformada (frente)": "SagaDFC",
+    "Saga showcase (NEO)": "SagaNeo",
+    "Saga showcase (NEO, verso)": "SagaNeoBack",
     "Caso": "Case",
     "Classe": "Class",
     "Vanguarda": "Vanguard",
@@ -277,7 +280,36 @@ def _molduras_das_faces(carta: ScryfallCard, moldura: str) -> list[str]:
     nomes = MOLDURA_DAS_FACES.get(carta.layout)
     if nomes is None:
         return [moldura] * _imagens_da_carta(carta)
-    return [MOLDURAS[nome] for nome in nomes]
+    molduras = [MOLDURAS[nome] for nome in nomes]
+    # A saga que transforma tem as duas coisas: a faixa de capitulos da saga e o
+    # simbolo da transformada. So o pacote de saga de duas faces reparte a
+    # carta assim.
+    if _e_saga(_dados_da_face(carta, 0)):
+        frente, verso = _saga_das_duas_faces(carta)
+        molduras[0] = MOLDURAS[frente]
+        if verso is not None:
+            molduras[1] = MOLDURAS[verso]
+    return molduras
+
+
+def _e_saga(face: FaceBase) -> bool:
+    """Se esta face imprime a faixa de capitulos na lateral."""
+    return "saga" in (face.type_line or "").lower()
+
+
+def _saga_das_duas_faces(carta: ScryfallCard) -> tuple[str, str | None]:
+    """As molduras dos dois lados de uma saga que transforma.
+
+    O acabamento showcase invertido reparte a carta do mesmo jeito e troca o aro
+    por um ornamentado dos dois lados - as unicas impressas assim ate hoje sao as
+    nove sagas showcase da NEO, e os pacotes vem do scan delas. Sem o
+    acabamento, so a frente muda: o verso e uma criatura comum e a transformada
+    do catalogo ja serve.
+    """
+    efeitos = carta.frame_effects or []
+    if "showcase" in efeitos and "inverted" in efeitos:
+        return "Saga showcase (NEO)", "Saga showcase (NEO, verso)"
+    return "Saga transformada (frente)", None
 
 
 _IMPRESSAO_DIGITAL = carregar("impressao-digital")
@@ -738,13 +770,13 @@ _CAPITULO_DE_SAGA = re.compile(r"^([IVX]+(?:,\s*[IVX]+)*)\s*—\s*(.+)$", re.DOT
 BLOCOS_DE_SAGA = 4
 
 
-def _capitulos_de_saga(carta: ScryfallCard) -> dict | None:
+def _capitulos_de_saga(face: FaceBase) -> dict | None:
     """Quebra o texto da saga no lembrete e nos blocos de capitulo.
 
     Devolve None quando o texto nao esta no formato esperado; ai a carta segue
     com a moldura montada e os blocos vazios, em vez de sair pela metade.
     """
-    linhas = [linha for linha in (carta.texto_exibido or "").split("\n") if linha.strip()]
+    linhas = [linha for linha in (face.texto_exibido or "").split("\n") if linha.strip()]
     if not linhas:
         return None
     lembrete = linhas.pop(0) if linhas[0].startswith("(") else ""
@@ -757,12 +789,24 @@ def _capitulos_de_saga(carta: ScryfallCard) -> dict | None:
     return {"lembrete": lembrete, "blocos": blocos} if blocos else None
 
 
-async def _aplicar_saga(page: Page, carta: ScryfallCard) -> None:
+# As duas roupas da moldura de saga: a da carta de uma face e a da que
+# transforma. Quem decide e a moldura, nao o layout - a saga que transforma tem
+# layout de duas faces e a faixa de capitulos na frente.
+MOLDURAS_DE_SAGA = frozenset(
+    {
+        MOLDURAS["Saga"],
+        MOLDURAS["Saga transformada (frente)"],
+        MOLDURAS["Saga showcase (NEO)"],
+    }
+)
+
+
+async def _aplicar_saga(page: Page, face: FaceBase, moldura: str) -> None:
     """Depois da moldura: os campos de capitulo so existem com o versionSaga.js
     carregado, e quem manda carregar e a moldura de saga."""
-    if carta.layout != Layout.SAGA:
+    if moldura not in MOLDURAS_DE_SAGA:
         return
-    partes = _capitulos_de_saga(carta)
+    partes = _capitulos_de_saga(face)
     if partes is None:
         return
     await page.evaluate(_APLICAR_SAGA, partes)
@@ -1261,7 +1305,7 @@ async def _preencher(
         if await _selecionar_impressao(page, carta, indice_da_face):
             await _esperar_desenho(page)
         await _aplicar_moldura(page, carta, face, moldura)
-        await _aplicar_saga(page, carta)
+        await _aplicar_saga(page, face, moldura)
         await _aplicar_classe(page, carta)
         await _aplicar_mutacao(page, carta)
         await _aplicar_nivel(page, carta, moldura)

@@ -6,8 +6,12 @@
 // desses campos vem preenchido - eles so existem na moldura, e so quem ja sabe
 // as duas faces pode escrever neles.
 (args) => {
-    if (card.text.reminder) {
-        card.text.reminder.text = args.ptDoOutroLado;
+    // A saga que transforma tem campo proprio pro poder/resistencia do verso: o
+    // reminder dela e o lembrete do marcador de conhecimento, e escrever ali
+    // apagaria o lembrete.
+    const campoDoPT = card.text.backPT || card.text.reminder;
+    if (campoDoPT) {
+        campoDoPT.text = args.ptDoOutroLado;
     }
     if (card.text.flipsideType) {
         card.text.flipsideType.text = args.tipoDoOutroLado;
