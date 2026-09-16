@@ -99,7 +99,7 @@ async def buscar(
             # So o art_crop passa pelo corte de moldura impressa: a ilustracao
             # do MTGPics nao tem tipografia de carta nenhuma, e o casamento com
             # o art_crop acima e feito com ele inteiro.
-            arte = _sem_moldura_impressa(referencia, carta)
+            arte = await _sem_a_moldura_da_colecao(client, referencia, carta)
         return _data_url(arte)
 
 
@@ -1169,14 +1169,7 @@ def _fim_da_moldura_impressa(imagem: Image.Image) -> float | None:
 
 
 def _sem_moldura_impressa(imagem: bytes, carta: ScryfallCard) -> bytes:
-    """O art_crop sem a moldura impressa que ele as vezes traz no topo.
-
-    So impressao sem borda ou de arte cheia passa por aqui: na carta com borda a
-    janela de arte e cercada pela moldura e o recorte nao pega tipografia
-    nenhuma.
-    """
-    if carta.border_color != "borderless" and not carta.full_art:
-        return imagem
+    """O art_crop sem a moldura impressa que ele as vezes traz no topo."""
     try:
         aberta = Image.open(BytesIO(imagem))
         aberta.load()
@@ -1192,6 +1185,256 @@ def _sem_moldura_impressa(imagem: bytes, carta: ScryfallCard) -> bytes:
         fim,
     )
     return _cortar(aberta, (0.0, fim, 1.0, 1.0))
+
+
+# A moldura da colecao sem borda nem sempre e reta. Ela pode ser um arco, um
+# chanfro de canto ou um filete curvo, e ai nem a aresta nem a chapa a acham:
+# as duas medem a linha inteira, e curva nenhuma atravessa a imagem. O que a
+# acha e a repeticao - as outras impressoes da mesma colecao com o mesmo
+# acabamento trazem a MESMA moldura sobre outra pintura, entao o pixel que e
+# borda em quase todas elas e moldura, e o que muda de uma pra outra e pintura.
+#
+# Medido em 99 art_crops sem borda de 15 colecoes (75 com moldura impressa, 24
+# limpos): o ornamento de canto da `HOB` sai dos quatro lados, o chanfro da
+# `SOA` e a faixa de titulo da `SLD` saem do topo, e dos 24 limpos o maior
+# corte e de 0,021 da altura.
+
+# Tamanho em que as irmas sao comparadas e o degrau de cinza que conta como
+# borda.
+LADO_DA_MASCARA = (256, 187)
+DEGRAU_DA_MASCARA = 18
+
+# Quantas irmas a mascara pede. Abaixo do minimo duas pinturas parecidas ja
+# viram moldura - com 4, a pagina de quadrinho da `MSH` marcava 0,195 da
+# largura como se fosse coluna de moldura; acima do maximo cada irma custa uma
+# requisicao sem mudar o desenho que sai.
+IRMAS_MINIMAS = 5
+IRMAS_MAXIMAS = 6
+
+# Em quantas irmas o pixel precisa ser borda pra contar como moldura, e quanto
+# da linha (ou da coluna) precisa ser moldura pra ela sair no corte - o maior
+# entre o piso fixo e o que a propria imagem marca fora da moldura.
+IRMAS_QUE_CONFIRMAM = 0.8
+MOLDURA_NA_FAIXA = 0.15
+VEZES_O_RUIDO_DA_MASCARA = 2.0
+
+# Ate onde procurar, a partir de cada lado. E tambem o teto do corte: moldura
+# que passa disso nao e moldura, e a arte da colecao inteira se parecendo com
+# ela mesma - a impressao em CMYK da `SLZ` marcava 0,31 da largura dos dois
+# lados, e a pagina de quadrinho da `MSH`, 0,21.
+FAIXA_DA_MASCARA = 0.20
+
+# Quanto o formato do art_crop da irma pode se afastar do desta impressao. Fora
+# disso as duas nao cobrem o mesmo pedaco da carta, e a moldura de uma cai
+# noutro lugar da outra.
+FOLGA_DO_FORMATO_DA_IRMA = 0.02
+
+# A busca de cada acabamento, guardada pra que um deck com varias cartas do
+# mesmo ciclo pague uma requisicao so. A escolha das irmas e por carta: a
+# colecao promocional junta dezenas de molduras diferentes sob o mesmo codigo,
+# e o que as separa e a numeracao - o ciclo sai em numeros seguidos.
+_CANDIDATAS_DO_ACABAMENTO: dict[tuple[str, str, bool, tuple[str, ...]], list[dict]] = {}
+
+# A mesma irma serve varias cartas do ciclo; baixar de novo so gasta requisicao.
+_ART_CROP_BAIXADO: dict[str, bytes | None] = {}
+
+_SO_DIGITOS = re.compile(r"\d+")
+
+
+def _acabamento(
+    edicao: str, borda: str | None, arte_cheia: bool, efeitos: list[str] | None
+) -> tuple[str, str, bool, tuple[str, ...]]:
+    return (edicao, borda or "", bool(arte_cheia), tuple(sorted(efeitos or [])))
+
+
+def _numero(collector_number: str) -> int:
+    """O numero do colecionador sem o sufixo de acabamento (247★ vira 247)."""
+    achado = _SO_DIGITOS.search(collector_number or "")
+    return int(achado.group()) if achado else 0
+
+
+async def _irmas_do_acabamento(
+    client: httpx.AsyncClient, carta: ScryfallCard, referencia: bytes
+) -> list[bytes]:
+    """O art_crop das impressoes vizinhas da colecao com o mesmo acabamento."""
+    chave = _acabamento(carta.set, carta.border_color, carta.full_art, carta.frame_effects)
+    if chave not in _CANDIDATAS_DO_ACABAMENTO:
+        _CANDIDATAS_DO_ACABAMENTO[chave] = await _candidatas_a_irma(client, carta, chave)
+    daqui = _numero(carta.collector_number)
+    vizinhas = sorted(
+        (
+            d
+            for d in _CANDIDATAS_DO_ACABAMENTO[chave]
+            if d.get("collector_number") != carta.collector_number
+        ),
+        key=lambda d: abs(_numero(d.get("collector_number", "")) - daqui),
+    )
+
+    aspecto = _aspecto(referencia)
+    baixadas: list[bytes] = []
+    for dados in vizinhas:
+        if len(baixadas) >= IRMAS_MAXIMAS:
+            break
+        url = _art_crop_do_lado(dados, 0)
+        if not url:
+            continue
+        if url not in _ART_CROP_BAIXADO:
+            _ART_CROP_BAIXADO[url] = await _baixar_imagem(client, url)
+        imagem = _ART_CROP_BAIXADO[url]
+        if imagem is not None and _mesmo_recorte(imagem, aspecto):
+            baixadas.append(imagem)
+    return baixadas
+
+
+async def _candidatas_a_irma(
+    client: httpx.AsyncClient,
+    carta: ScryfallCard,
+    chave: tuple[str, str, bool, tuple[str, ...]],
+) -> list[dict]:
+    termos = [f"set:{carta.set}"]
+    if carta.border_color:
+        termos.append(f"border:{carta.border_color}")
+    if carta.full_art:
+        termos.append("is:fullart")
+    try:
+        resposta = await rede.com_retentativa_no_429(
+            lambda: client.get(
+                f"{BASE_SCRYFALL}/cards/search",
+                params={"q": " ".join(termos), "order": "set"},
+            )
+        )
+    except httpx.HTTPError:
+        return []
+    if resposta.status_code != httpx.codes.OK:
+        return []
+    return [d for d in resposta.json().get("data", []) if _do_mesmo_acabamento(d, chave)]
+
+
+def _do_mesmo_acabamento(dados: dict, chave: tuple[str, str, bool, tuple[str, ...]]) -> bool:
+    return (
+        _acabamento(
+            dados.get("set", ""),
+            dados.get("border_color"),
+            dados.get("full_art", False),
+            dados.get("frame_effects"),
+        )
+        == chave
+    )
+
+
+def _mesmo_recorte(imagem: bytes, aspecto: float | None) -> bool:
+    """Se a irma recorta o mesmo pedaco da carta que esta impressao."""
+    if aspecto is None:
+        return False
+    da_irma = _aspecto(imagem)
+    return da_irma is not None and abs(da_irma - aspecto) / aspecto < FOLGA_DO_FORMATO_DA_IRMA
+
+
+def _bordas_da_mascara(imagem: bytes) -> list[int] | None:
+    """Onde a imagem tem borda, nos dois sentidos, no tamanho da mascara."""
+    try:
+        aberta = Image.open(BytesIO(imagem)).convert("L").resize(LADO_DA_MASCARA)
+    except (UnidentifiedImageError, OSError):
+        return None
+    juntas = ImageChops.lighter(
+        ImageChops.difference(aberta, ImageChops.offset(aberta, 1, 0)),
+        ImageChops.difference(aberta, ImageChops.offset(aberta, 0, 1)),
+    )
+    return [int(valor >= DEGRAU_DA_MASCARA) for valor in juntas.getdata()]
+
+
+def _mascara_da_moldura(irmas: list[bytes]) -> list[bool] | None:
+    """Onde a moldura da colecao cai dentro do art_crop, ou None sem irmas."""
+    mapas = [mapa for mapa in (_bordas_da_mascara(irma) for irma in irmas) if mapa is not None]
+    if len(mapas) < IRMAS_MINIMAS:
+        return None
+    largura, altura = LADO_DA_MASCARA
+    piso = IRMAS_QUE_CONFIRMAM * len(mapas)
+    mascara = [sum(mapa[ponto] for mapa in mapas) >= piso for ponto in range(largura * altura)]
+    # O deslocamento e circular: a primeira linha e comparada com a ultima e a
+    # primeira coluna com a ultima, entao as duas saem sempre como borda.
+    for x in range(largura):
+        mascara[x] = False
+    for y in range(altura):
+        mascara[y * largura] = False
+    return mascara
+
+
+def _ate_onde_a_moldura_vai(perfil: list[float]) -> int:
+    """Quantas faixas, contando da ponta, a moldura ocupa.
+
+    O piso e relativo ao proprio perfil: colecao de estilo fechado repete
+    textura em toda a imagem, e ai o fundo sozinho ja passa de um piso fixo - o
+    papel de jornal da `OTP` marcava 0,16 na base, onde nao ha moldura nenhuma.
+
+    Moldura que chega ao fim da faixa procurada nao acabou de ser medida: o que
+    se viu foi moldura do comeco ao fim, e onde ela para ficou fora da conta.
+    Cortar no limite da busca seria chutar, entao esse lado sai inteiro.
+    """
+    ate = int(len(perfil) * FAIXA_DA_MASCARA)
+    piso = max(MOLDURA_NA_FAIXA, median(perfil) * VEZES_O_RUIDO_DA_MASCARA)
+    fim = 0
+    for indice in range(ate):
+        if perfil[indice] >= piso:
+            fim = indice + 1
+    return 0 if fim >= ate else fim
+
+
+def _janela_sem_a_moldura(mascara: list[bool]) -> tuple[float, float, float, float]:
+    """O retangulo do art_crop que a moldura da colecao nao alcanca, em fracao."""
+    largura, altura = LADO_DA_MASCARA
+    linhas = [sum(mascara[y * largura : (y + 1) * largura]) / largura for y in range(altura)]
+    colunas = [
+        sum(mascara[y * largura + x] for y in range(altura)) / altura for x in range(largura)
+    ]
+    return (
+        _ate_onde_a_moldura_vai(colunas) / largura,
+        _ate_onde_a_moldura_vai(linhas) / altura,
+        1 - _ate_onde_a_moldura_vai(colunas[::-1]) / largura,
+        1 - _ate_onde_a_moldura_vai(linhas[::-1]) / altura,
+    )
+
+
+async def _sem_a_moldura_da_colecao(
+    client: httpx.AsyncClient, imagem: bytes, carta: ScryfallCard
+) -> bytes:
+    """O art_crop reduzido ao que a moldura da colecao nao cobre.
+
+    So impressao sem borda ou de arte cheia passa por aqui: na carta com borda
+    a janela de arte e cercada pela moldura e o recorte nao pega tipografia
+    nenhuma.
+
+    As duas medidas se somam. A mascara acha o que a colecao repete - arco,
+    chanfro, filete -, e `_sem_moldura_impressa` acha a faixa de titulo, que a
+    mascara nao ve: o nome muda de carta pra carta, e o que muda nao e moldura.
+    """
+    if carta.border_color != "borderless" and not carta.full_art:
+        return imagem
+    mascara = _mascara_da_moldura(await _irmas_do_acabamento(client, carta, imagem))
+    if mascara is not None:
+        imagem = _na_janela_da_colecao(imagem, _janela_sem_a_moldura(mascara), carta)
+    return _sem_moldura_impressa(imagem, carta)
+
+
+def _na_janela_da_colecao(
+    imagem: bytes, janela: tuple[float, float, float, float], carta: ScryfallCard
+) -> bytes:
+    if janela == (0.0, 0.0, 1.0, 1.0):
+        return imagem
+    try:
+        aberta = Image.open(BytesIO(imagem))
+        aberta.load()
+    except (UnidentifiedImageError, OSError):
+        return imagem
+    logger.info(
+        "%s: a moldura da colecao deixa a arte em x %.3f-%.3f e y %.3f-%.3f, cortando ali",
+        carta.nome_exibido,
+        janela[0],
+        janela[2],
+        janela[1],
+        janela[3],
+    )
+    return _cortar(aberta, janela)
 
 
 def _pixels(imagem: bytes) -> int:
