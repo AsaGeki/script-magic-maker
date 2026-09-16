@@ -722,27 +722,91 @@ async def _pagina_da_carta(client: httpx.AsyncClient, carta: ScryfallCard) -> st
     """O HTML da pagina do MTGPics que e mesmo desta carta, ou None.
 
     O ref montado com edicao e numero do Scryfall acerta na maioria, mas as
-    duas fontes numeram diferente. Quando o titulo desmente o ref, a busca por
-    nome do site diz o certo; sem confirmacao, o chamador fica no art_crop.
+    duas fontes numeram diferente. Falhando ele, a pagina do ilustrador diz o
+    ref desta impressao e a busca por nome, o da carta; sem confirmacao, o
+    chamador fica no art_crop.
     """
     montado = f"{carta.set}{carta.collector_number.zfill(3)}"
     pagina = await _pagina_do_ref(client, montado)
     if pagina is not None and _e_a_carta(pagina, carta):
         return pagina
 
-    achado = await _ref_por_nome(client, carta.name)
-    if achado is None or achado == montado:
-        return None
-    pagina = await _pagina_do_ref(client, achado)
-    if pagina is not None and _e_a_carta(pagina, carta):
-        logger.info(
-            "%s: %s#%s no MTGPics e outra carta, seguindo pelo ref %s",
-            carta.nome_exibido,
-            carta.set.upper(),
-            carta.collector_number,
-            achado,
+    tentados = {montado}
+    for achar in (_ref_pelo_ilustrador, _ref_por_nome_da_carta):
+        achado = await achar(client, carta)
+        if achado is None or achado in tentados:
+            continue
+        tentados.add(achado)
+        pagina = await _pagina_do_ref(client, achado)
+        if pagina is not None and _e_a_carta(pagina, carta):
+            logger.info(
+                "%s: %s#%s no MTGPics e outra carta, seguindo pelo ref %s",
+                carta.nome_exibido,
+                carta.set.upper(),
+                carta.collector_number,
+                achado,
+            )
+            return pagina
+    return None
+
+
+async def _ref_por_nome_da_carta(client: httpx.AsyncClient, carta: ScryfallCard) -> str | None:
+    return await _ref_por_nome(client, carta.name)
+
+
+# O ilustrador e o unico caminho que separa uma impressao da outra quando o ref
+# montado erra: a busca por nome devolve a arte mais conhecida da carta - a
+# `Goblin Guide` de 2010, nao a que o Luke Pearson pintou pro Secret Lair - e a
+# pagina do artista lista so o que ele pintou, com o nome da carta no `alt` de
+# cada miniatura.
+_ILUSTRADORES: dict[str, str] = {}
+
+_ILUSTRADOR_NA_LISTA = re.compile(r"illus\?art=(\d+)[^>]*>\s*([^<]{3,40})")
+_CARTA_DO_ILUSTRADOR = re.compile(r'card\?ref=([a-z0-9]+)>\s*<img[^>]*alt="([^"]+)"', re.IGNORECASE)
+
+
+async def _ilustradores(client: httpx.AsyncClient) -> dict[str, str]:
+    """Nome do artista -> id dele no MTGPics. A lista inteira vem numa pagina."""
+    if _ILUSTRADORES:
+        return _ILUSTRADORES
+    try:
+        resposta = await rede.com_retentativa_no_429(
+            lambda: client.get(f"{BASE_MTGPICS}/illustrators")
         )
-        return pagina
+    except httpx.HTTPError:
+        return _ILUSTRADORES
+    if resposta.status_code != httpx.codes.OK:
+        return _ILUSTRADORES
+    for ident, nome in _ILUSTRADOR_NA_LISTA.findall(resposta.text):
+        _ILUSTRADORES.setdefault(slug(nome), ident)
+    return _ILUSTRADORES
+
+
+def _nomes_do_artista(artista: str) -> list[str]:
+    """Carta de varios artistas vem junta no Scryfall e separada no MTGPics."""
+    return [slug(artista), *(slug(parte) for parte in re.split(r"&|//", artista))]
+
+
+async def _ref_pelo_ilustrador(client: httpx.AsyncClient, carta: ScryfallCard) -> str | None:
+    """O ref desta carta na pagina de quem o Scryfall credita, ou None."""
+    if not carta.artist:
+        return None
+    lista = await _ilustradores(client)
+    ident = next((lista[nome] for nome in _nomes_do_artista(carta.artist) if nome in lista), None)
+    if ident is None:
+        return None
+    try:
+        resposta = await rede.com_retentativa_no_429(
+            lambda: client.get(f"{BASE_MTGPICS}/illus", params={"art": ident})
+        )
+    except httpx.HTTPError:
+        return None
+    if resposta.status_code != httpx.codes.OK:
+        return None
+    desta = {slug(carta.name), slug(carta.name.split("//")[0])}
+    for ref, rotulo in _CARTA_DO_ILUSTRADOR.findall(resposta.text):
+        if slug(rotulo.split(" - ")[0]) in desta:
+            return ref.lower()
     return None
 
 
